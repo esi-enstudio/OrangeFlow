@@ -42,10 +42,16 @@ async def save_permission(message: Message, state: FSMContext):
 # --- ২. রোল তৈরি ও পারমিশন সিলেকশন কিবোর্ড ---
 @router.message(F.text == "➕ নতুন রোল তৈরি")
 async def start_role_creation(message: Message, state: FSMContext):
-    await state.clear()
+    # চেক করা হচ্ছে কোনো ফ্ল্যাগ আছে কি না
+    data = await state.get_data()
+    was_redirected = data.get("is_redirected_from_user", False)
+
     if int(message.from_user.id) == SUPER_ADMIN_ID:
-        await message.answer("রোলের নাম লিখুন (উদা: Manager):")
+        # স্টেট ক্লিয়ার না করে শুধু নতুন তথ্য যোগ করা
         await state.set_state(RoleCreateForm.name)
+        await state.update_data(is_redirected_from_user=was_redirected)
+
+        await message.answer("রোলের নাম লিখুন (উদা: Manager):")
 
 
 @router.message(RoleCreateForm.name)
@@ -102,14 +108,19 @@ async def toggle_permission(callback: CallbackQuery, state: FSMContext):
         await callback.answer()  # লোডিং আইকন বন্ধ করা
 
 
-# --- ৪. ফাইনাল সেভ লজিক ---
+# --- ফাইনাল সেভ লজিক ---
 @router.callback_query(F.data == "save_role_final")
 async def save_role_final(callback: CallbackQuery, state: FSMContext):
+    # ১. স্টেট থেকে সব ডাটা সংগ্রহ করা
     data = await state.get_data()
     role_name = data.get('name')
     perm_ids = data.get('selected_perms', [])
+    
+    # ২. চেক করা হচ্ছে এটি কি ইউজার ক্রিয়েশন থেকে রিডাইরেক্ট হয়ে এসেছে কি না
+    is_redirected = data.get("is_redirected_from_user", False)
 
     async with async_session() as session:
+        # ৩. নতুন রোল তৈরি ও পারমিশন যুক্ত করা
         new_role = Role(name=role_name)
         if perm_ids:
             res = await session.execute(select(Permission).where(Permission.id.in_(perm_ids)))
@@ -118,17 +129,24 @@ async def save_role_final(callback: CallbackQuery, state: FSMContext):
         session.add(new_role)
         await session.commit()
 
+    # ৪. ডাটাবেজ সেভ শেষে স্টেট ক্লিয়ার করা
     await state.clear()
 
-    # ইউজার তৈরির পেজে ফেরত যাওয়ার জন্য বাটন
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    builder = InlineKeyboardBuilder()
-    builder.button(text="👤 ইউজার তৈরিতে ফিরে যান", callback_data="go_to_user_create")
+    # ৫. লজিক অনুযায়ী রেসপন্স পাঠানো
+    if is_redirected:
+        # যদি রিডাইরেক্ট হয়ে আসে, তবেই কেবল বাটনটি দেখাবে
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="👤 ইউজার তৈরিতে ফিরে যান", callback_data="go_to_user_create")
+        
+        await callback.message.answer(
+            f"✅ রোল '{role_name}' সফলভাবে তৈরি হয়েছে।\nএখন আপনি ইউজার তৈরি করতে পারেন।",
+            reply_markup=builder.as_markup()
+        )
+    else:
+        # সরাসরি রোল তৈরি করলে সাধারণ সাকসেস মেসেজ
+        await callback.message.answer(f"✅ রোল '{role_name}' সফলভাবে তৈরি হয়েছে।")
 
-    await callback.message.answer(
-        f"✅ রোল '{role_name}' সফলভাবে তৈরি হয়েছে।\nএখন আপনি ইউজার তৈরি করতে পারেন।",
-        reply_markup=builder.as_markup()
-    )
     await callback.answer()
 
 

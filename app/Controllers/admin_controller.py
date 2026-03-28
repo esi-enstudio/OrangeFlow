@@ -1,31 +1,26 @@
+import logging
+from datetime import datetime, timedelta
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command, CommandObject
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.Models.role import Role
-from app.Views.keyboards.reply import get_admin_main_menu, get_house_mgmt_menu, get_settings_menu
 from app.Models.house import House
 from app.Models.user import User
+from app.Models.role import Role
 from app.Services.db_service import async_session
+from app.Views.keyboards.reply import get_admin_main_menu, get_house_mgmt_menu, get_settings_menu, get_user_mgmt_menu
 from config.settings import SUPER_ADMIN_ID
 
 router = Router()
 
-async def get_role_keyboard():
-    async with async_session() as session:
-        res = await session.execute(select(Role))
-        roles = res.scalars().all()
-        builder = InlineKeyboardBuilder()
-        for r in roles:
-            builder.button(text=r.name, callback_data=f"setrole_{r.id}")
-        return builder.as_markup()
-
+# ==========================================
+# 1. FSM STATES (ফরম ডিক্লারেশন)
+# ==========================================
 
 class HouseCreateForm(StatesGroup):
     name = State()
@@ -36,31 +31,63 @@ class HouseCreateForm(StatesGroup):
     address = State()
     contact = State()
 
-# ইউজার তৈরির জন্য নতুন FSM স্টেট
 class UserCreateForm(StatesGroup):
     telegram_id = State()
     name = State()
     phone = State()
     house_code = State()
-    role_id = State()
+    role_id = State() # মাল্টি-রোল সিলেকশনের জন্য ব্যবহৃত
+
+class UserUpdateForm(StatesGroup):
+    user_id = State()
+    field = State()
+    new_value = State()
+
+class RoleCreateForm(StatesGroup):
+    name = State()
+    perms = State()
 
 
-# --- ১. স্টার্ট কমান্ড এবং নেভিগেশন ---
+# ==========================================
+# 2. HELPER FUNCTIONS (অভ্যন্তরীণ কাজের জন্য)
+# ==========================================
+
+async def render_user_details(message: Message, user_id: int):
+    """ইউজারের বিস্তারিত তথ্য দেখানোর কমন ফাংশন (এরর এড়াতে এটি জরুরি)"""
+    async with async_session() as session:
+        result = await session.execute(
+            select(User).where(User.id == user_id).options(selectinload(User.roles))
+        )
+        u = result.scalar_one_or_none()
+        if not u:
+            return await message.answer("❌ ইউজার পাওয়া যায়নি।")
+            
+        role_names = ", ".join([r.name for r in u.roles]) if u.roles else "রোল নেই"
+        details = (
+            f"👤 **ইউজার ডিটেইলস**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🆔 আইডি: `{u.telegram_id}`\n"
+            f"📛 নাম: {u.name}\n"
+            f"📞 ফোন: {u.phone_number or 'দেওয়া নেই'}\n"
+            f"🛠 রোল: {role_names}\n"
+            f"────────────────────"
+        )
+        from app.Views.keyboards.inline import get_user_action_kb
+        await message.edit_text(details, reply_markup=get_user_action_kb(u.id), parse_mode="Markdown")
+
+
+# ==========================================
+# 3. CORE NAVIGATION (প্রধান মেনু ও নেভিগেশন)
+# ==========================================
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
-    await state.clear() # যেকোনো চলমান প্রসেস ক্লিয়ার করবে
+    await state.clear()
     user_id = message.from_user.id
 
-    # ১. সুপার এডমিন চেক (সবার আগে)
     if int(user_id) == int(SUPER_ADMIN_ID):
-        # return দেওয়ার মানে হলো এই মেসেজটি পাঠিয়ে কোড এখানেই থেমে যাবে
-        return await message.answer(
-            "👋 স্বাগতম সুপার এডমিন! ❤️",
-            reply_markup=get_admin_main_menu()
-        )
+        return await message.answer("👋 স্বাগতম সুপার এডমিন! ❤️", reply_markup=get_admin_main_menu())
 
-    # ২. ডাটাবেজে ইউজার রেজিস্টার্ড কি না চেক করা
     async with async_session() as session:
         result = await session.execute(select(User).where(User.telegram_id == user_id))
         db_user = result.scalar_one_or_none()
@@ -71,30 +98,19 @@ async def cmd_start(message: Message, state: FSMContext):
                 f"👋 স্বাগতম {db_user.name}!\nআপনার অ্যাকাউন্টটি সক্রিয় আছে।"
             )
 
-    # ৩. যদি উপরের কোনোটিই না হয় (অচেনা ইউজার), শুধুমাত্র তখনই নিচের মেসেজটি যাবে
     await message.answer(
-        f"আপনার আইডি: `{user_id}`\n"
-        "অনুগৃহ করে এই আইডি সুপার এডমিনকে দিন, যাতে আপনাকে সিস্টেমে যুক্ত করা যায়।",
+        f"আপনার আইডি: `{user_id}`\nঅনুগ্রহ করে এই আইডি এডমিনকে দিন।",
         parse_mode="Markdown"
     )
-
 
 @router.message(F.text == "🏠 হাউজ ম্যানেজমেন্ট")
 async def house_mgmt_menu(message: Message):
     if int(message.from_user.id) == int(SUPER_ADMIN_ID):
         await message.answer("🏢 হাউজ ম্যানেজমেন্ট অপশন:", reply_markup=get_house_mgmt_menu())
 
-@router.message(F.text == "🔙 প্রধান মেনু")
-async def back_to_main(message: Message, state: FSMContext):
-    await state.clear()
-    if int(message.from_user.id) == int(SUPER_ADMIN_ID):
-        await message.answer("প্রধান মেনু:", reply_markup=get_admin_main_menu())
-
 @router.message(F.text == "👤 ইউজার ম্যানেজমেন্ট")
 async def user_mgmt_menu(message: Message):
     if int(message.from_user.id) == int(SUPER_ADMIN_ID):
-        # একটি সাব-মেনু কিবোর্ড (নিচে reply.py তে এটি তৈরি করতে হবে)
-        from app.Views.keyboards.reply import get_user_mgmt_menu
         await message.answer("👤 ইউজার ম্যানেজমেন্ট অপশনসমূহ:", reply_markup=get_user_mgmt_menu())
 
 @router.message(F.text == "⚙️ সেটিংস")
@@ -108,7 +124,256 @@ async def settings_menu(message: Message):
             reply_markup=get_settings_menu(),
             parse_mode="Markdown"
         )
-# --- ২. হাউজ তৈরির ধাপসমূহ ---
+
+@router.message(F.text == "🔙 প্রধান মেনু")
+async def back_to_main(message: Message, state: FSMContext):
+    await state.clear()
+    if int(message.from_user.id) == int(SUPER_ADMIN_ID):
+        await message.answer("প্রধান মেনু:", reply_markup=get_admin_main_menu())
+
+
+# ==========================================
+# 4. USER CREATION FLOW (ইউজার তৈরির ধাপসমূহ)
+# ==========================================
+
+@router.message(F.text == "➕ নতুন ইউজার তৈরি")
+async def start_user_creation(message: Message, state: FSMContext):
+    await state.clear()
+    if int(message.from_user.id) != SUPER_ADMIN_ID: return
+
+    async with async_session() as session:
+        res = await session.execute(select(Role))
+        if not res.scalars().all():
+            return await message.answer("⚠️ আগে রোল তৈরি করুন!", reply_markup=get_settings_menu())
+
+    await message.answer("ইউজারের টেলিগ্রাম আইডি (Telegram ID) লিখুন:")
+    await state.set_state(UserCreateForm.telegram_id)
+
+@router.message(UserCreateForm.telegram_id)
+async def process_user_tid(message: Message, state: FSMContext):
+    if not message.text.isdigit():
+        return await message.answer("ভুল আইডি! শুধুমাত্র সংখ্যা লিখুন।")
+    await state.update_data(telegram_id=int(message.text))
+    await message.answer("ইউজারের নাম লিখুন:")
+    await state.set_state(UserCreateForm.name)
+
+@router.message(UserCreateForm.name)
+async def process_user_name(message: Message, state: FSMContext):
+    await state.update_data(name=message.text)
+    await message.answer("ইউজারের ফোন নাম্বার লিখুন:")
+    await state.set_state(UserCreateForm.phone)
+
+@router.message(UserCreateForm.phone)
+async def process_user_phone(message: Message, state: FSMContext):
+    await state.update_data(phone=message.text, selected_roles=[])
+    async with async_session() as session:
+        roles = (await session.execute(select(Role))).scalars().all()
+        if not roles:
+            await state.update_data(is_redirected_from_user=True)
+            return await message.answer("⚠️ রোল নেই! আগে রোল তৈরি করুন।", reply_markup=get_settings_menu())
+
+        builder = InlineKeyboardBuilder()
+        for r in roles:
+            builder.button(text=f"🔘 {r.name}", callback_data=f"toggle_user_role_{r.id}")
+        builder.button(text="✅ সেভ ও এগিয়ে যান", callback_data="save_user_roles")
+        builder.adjust(2)
+        await message.answer("ইউজারের রোল সিলেক্ট করুন:", reply_markup=builder.as_markup())
+        await state.set_state(UserCreateForm.role_id)
+
+@router.callback_query(F.data.startswith("toggle_user_role_"))
+async def toggle_user_role(callback: CallbackQuery, state: FSMContext):
+    role_id = int(callback.data.split("_")[3])
+    data = await state.get_data()
+    selected = data.get("selected_roles", [])
+    if role_id in selected: selected.remove(role_id)
+    else: selected.append(role_id)
+    await state.update_data(selected_roles=selected)
+
+    async with async_session() as session:
+        all_roles = (await session.execute(select(Role))).scalars().all()
+        builder = InlineKeyboardBuilder()
+        for r in all_roles:
+            status = "✅" if r.id in selected else "🔘"
+            builder.button(text=f"{status} {r.name}", callback_data=f"toggle_user_role_{r.id}")
+        builder.button(text="✅ সেভ ও এগিয়ে যান", callback_data="save_user_roles")
+        builder.adjust(2)
+        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+        await callback.answer()
+
+@router.callback_query(F.data == "save_user_roles")
+async def save_user_roles_step(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if not data.get("selected_roles"):
+        return await callback.answer("⚠️ অন্তত একটি রোল সিলেক্ট করুন!", show_alert=True)
+    await callback.message.answer("হাউজ কোড (House Code) লিখুন:")
+    await state.set_state(UserCreateForm.house_code)
+    await callback.answer()
+
+@router.message(UserCreateForm.house_code)
+async def save_user_final(message: Message, state: FSMContext):
+    data = await state.get_data()
+    async with async_session() as session:
+        h_res = await session.execute(select(House).where(House.code == message.text))
+        house = h_res.scalar_one_or_none()
+        if not house: return await message.answer("❌ ভুল হাউজ কোড!")
+
+        r_res = await session.execute(select(Role).where(Role.id.in_(data['selected_roles'])))
+        new_user = User(
+            telegram_id=data['telegram_id'],
+            name=data['name'],
+            phone_number=data['phone'],
+            roles=r_res.scalars().all()
+        )
+        session.add(new_user)
+        await session.commit()
+        
+    await state.clear()
+    await message.answer(f"✅ ইউজার সফলভাবে তৈরি হয়েছে!\n👤 নাম: {data['name']}\n🏠 হাউজ: {house.name}")
+
+
+# ==========================================
+# 5. USER MANAGEMENT (লিস্ট, আপডেট ও ডিলিট)
+# ==========================================
+
+@router.message(F.text == "📋 ইউজার লিস্ট দেখুন")
+async def show_user_list(message: Message):
+    # message.chat.id ব্যবহার করলে এটি সরাসরি এডমিনের চ্যাট আইডি চেক করবে 
+    # যা মেসেজ বা বাটন—উভয় ক্ষেত্রেই কাজ করবে।
+    if int(message.chat.id) != SUPER_ADMIN_ID: 
+        return
+    
+    async with async_session() as session:
+        users = (await session.execute(select(User))).scalars().all()
+        if not users: return await message.answer("⚠️ কোনো ইউজার নেই।")
+        builder = InlineKeyboardBuilder()
+        for u in users:
+            builder.button(text=f"👤 {u.name} ({u.telegram_id})", callback_data=f"manage_u_{u.id}")
+        builder.adjust(1)
+        await message.answer("👥 নিবন্ধিত ইউজার তালিকা:", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("manage_u_"))
+async def view_user_actions(callback: CallbackQuery):
+    user_id = int(callback.data.split("_")[2])
+    await render_user_details(callback.message, user_id)
+    await callback.answer()
+
+@router.callback_query(F.data == "back_to_ulist")
+async def back_to_user_list(callback: CallbackQuery, state: FSMContext = None): # ডিফল্ট None
+    # যদি state অবজেক্ট থাকে তবেই ক্লিয়ার করবে
+    if state:
+        await state.clear()
+    
+    try: 
+        await callback.message.delete()
+    except: 
+        pass
+        
+    # তালিকা পুনরায় দেখানোর জন্য আপনার মেইন ফাংশনটি কল করা
+    await show_user_list(callback.message)
+    await callback.answer()
+
+# --- ডিলিট লজিক ---
+@router.callback_query(F.data.startswith("conf_del_u_"))
+async def confirm_delete_user(callback: CallbackQuery):
+    user_id = callback.data.split("_")[3]
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ হ্যাঁ, ডিলিট", callback_data=f"final_del_u_{user_id}")
+    builder.button(text="❌ না, বাতিল", callback_data=f"manage_u_{user_id}")
+    await callback.message.edit_text("⚠️ আপনি কি নিশ্চিতভাবে এই ইউজারকে ডিলিট করতে চান?", reply_markup=builder.as_markup())
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("final_del_u_"))
+async def final_delete_user(callback: CallbackQuery, state: FSMContext): # state যোগ করা হয়েছে
+    user_id = int(callback.data.split("_")[3])
+    async with async_session() as session:
+        u = await session.get(User, user_id)
+        if u:
+            await session.delete(u)
+            await session.commit()
+            await callback.answer(f"✅ ইউজার '{u.name}' সফলভাবে ডিলিট হয়েছে।", show_alert=True)
+    
+    # এখানে 'None' এর পরিবর্তে 'state' পাস করতে হবে
+    await back_to_user_list(callback, state)
+
+# --- আপডেট লজিক ---
+@router.callback_query(F.data.startswith("edit_uname_") | F.data.startswith("edit_uphone_"))
+async def start_user_edit(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split("_")
+    # ফিল্টারটি কিবোর্ডের ID এর সাথে ম্যাচ করা হয়েছে
+    field = "name" if "uname" in parts[1] else "phone"
+    user_id = int(parts[2])
+    
+    await state.update_data(edit_uid=user_id, edit_field=field)
+    label = "নাম" if field == "name" else "ফোন নাম্বার"
+    await callback.message.answer(f"ইউজারের নতুন **{label}** লিখে পাঠান:")
+    await state.set_state(UserUpdateForm.new_value)
+    await callback.answer()
+
+@router.message(UserUpdateForm.new_value)
+async def save_user_edit(message: Message, state: FSMContext):
+    data = await state.get_data()
+    async with async_session() as session:
+        u = await session.get(User, data['edit_uid'])
+        if data['edit_field'] == "name": u.name = message.text
+        else: u.phone_number = message.text
+        await session.commit()
+    await state.clear()
+    await message.answer("✅ সফলভাবে আপডেট হয়েছে।")
+
+# --- রোল আপডেট লজিক ---
+@router.callback_query(F.data.startswith("edit_user_roles_"))
+async def edit_user_roles_start(callback: CallbackQuery, state: FSMContext):
+    user_id = int(callback.data.split("_")[3])
+    async with async_session() as session:
+        u = (await session.execute(select(User).where(User.id==user_id).options(selectinload(User.roles)))).scalar_one()
+        all_r = (await session.execute(select(Role))).scalars().all()
+        curr_ids = [r.id for r in u.roles]
+        await state.update_data(editing_uid=user_id, selected_role_ids=curr_ids)
+        builder = InlineKeyboardBuilder()
+        for r in all_r:
+            status = "✅" if r.id in curr_ids else "🔘"
+            builder.button(text=f"{status} {r.name}", callback_data=f"toggle_u_edit_role_{r.id}")
+        builder.button(text="💾 সেভ", callback_data="save_u_roles_edit")
+        builder.button(text="🔙", callback_data=f"manage_u_{user_id}")
+        builder.adjust(2)
+        await callback.message.edit_text("রোল পরিবর্তন করুন:", reply_markup=builder.as_markup())
+
+@router.callback_query(F.data.startswith("toggle_u_edit_role_"))
+async def toggle_edit_role(callback: CallbackQuery, state: FSMContext):
+    role_id = int(callback.data.split("_")[4])
+    data = await state.get_data()
+    selected = data['selected_role_ids']
+    if role_id in selected: selected.remove(role_id)
+    else: selected.append(role_id)
+    await state.update_data(selected_role_ids=selected)
+    async with async_session() as session:
+        all_r = (await session.execute(select(Role))).scalars().all()
+        builder = InlineKeyboardBuilder()
+        for r in all_r:
+            status = "✅" if r.id in selected else "🔘"
+            builder.button(text=f"{status} {r.name}", callback_data=f"toggle_u_edit_role_{r.id}")
+        builder.button(text="💾 সেভ", callback_data="save_u_roles_edit")
+        builder.button(text="🔙", callback_data=f"manage_u_{data['editing_uid']}")
+        builder.adjust(2)
+        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+        await callback.answer()
+
+@router.callback_query(F.data == "save_u_roles_edit")
+async def save_user_roles_final(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    async with async_session() as session:
+        u = await session.get(User, data['editing_uid'], options=[selectinload(User.roles)])
+        r_res = await session.execute(select(Role).where(Role.id.in_(data['selected_role_ids'])))
+        u.roles = r_res.scalars().all()
+        await session.commit()
+    await state.clear()
+    await render_user_details(callback.message, data['editing_uid'])
+    await callback.answer("✅ রোল আপডেট হয়েছে", show_alert=True)
+
+
+# ==========================================
+# 6. HOUSE MANAGEMENT (হাউজ ও সাবস্ক্রিপশন)
+# ==========================================
 
 @router.message(F.text == "➕ নতুন হাউজ তৈরি")
 async def start_house_creation(message: Message, state: FSMContext):
@@ -116,13 +381,11 @@ async def start_house_creation(message: Message, state: FSMContext):
     await message.answer("হাউজের নাম লিখুন:")
     await state.set_state(HouseCreateForm.name)
 
-
 @router.message(HouseCreateForm.name)
 async def process_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
     await message.answer("হাউজ কোড (Code) লিখুন: (উদা: MYMVAI01)")
     await state.set_state(HouseCreateForm.code)
-
 
 @router.message(HouseCreateForm.code)
 async def process_code(message: Message, state: FSMContext):
@@ -158,7 +421,6 @@ async def process_address(message: Message, state: FSMContext):
     await message.answer("কন্টাক্ট নাম্বার (Contact) লিখুন:")
     await state.set_state(HouseCreateForm.contact)
 
-
 @router.message(HouseCreateForm.contact)
 async def save_house_final(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -189,264 +451,33 @@ async def save_house_final(message: Message, state: FSMContext):
     )
 
 
-# --- ২. নতুন ইউজার তৈরির ধাপসমূহ ---
-@router.message(F.text == "📋 ইউজার লিস্ট দেখুন")
-async def show_user_list(message: Message):
-    if int(message.from_user.id) != SUPER_ADMIN_ID: return None
 
 
-    async with async_session() as session:
-        # selectinload ব্যবহার করা হয়েছে যাতে ইউজারের সাথে তার রোলের নামও আসে
-        result = await session.execute(select(User).options(selectinload(User.roles)))
-        users = result.scalars().all()
-
-        if not users:
-            return await message.answer("⚠️ বর্তমানে কোনো ইউজার নিবন্ধিত নেই।")
-
-        text = "👥 **নিবন্ধিত ইউজার তালিকা**\n"
-        text += "━━━━━━━━━━━━━━━━━━━━\n\n"
-
-        for index, u in enumerate(users, start=1):
-            role_names = ", ".join([r.name for r in u.roles]) if u.roles else "রোল নেই"
-
-            text += f"👤 **ইউজার #{index}**\n"
-            text += f"🆔 আইডি: `{u.telegram_id}`\n"
-            text += f"📛 নাম: {u.name}\n"
-            text += f"📞 ফোন: {u.phone_number or 'দেওয়া নেই'}\n"
-            text += f"🛠 রোল: {role_names}\n"
-            text += "────────────────────\n"
-
-        await message.answer(text, parse_mode="Markdown")
-        return None
-
-
-# --- ১. নতুন ইউজার তৈরি শুরু ---
-@router.message(F.text == "➕ নতুন ইউজার তৈরি")
-async def start_user_creation(message: Message, state: FSMContext):
-    await state.clear()
-    if int(message.from_user.id) != SUPER_ADMIN_ID: return
-
-    async with async_session() as session:
-        # সবার আগে চেক: রোল আছে কি না
-        res = await session.execute(select(Role))
-        roles = res.scalars().all()
-
-        if not roles:
-            # রোল না থাকলে মেসেজ এবং সেটিংস মেনু (রোল/পারমিশন তৈরির বাটন) দেখাবে
-            from app.Views.keyboards.reply import get_settings_menu
-            return await message.answer(
-                "⚠️ সিস্টেমে কোনো **রোল (Role)** তৈরি করা নেই!\n"
-                "রোল ছাড়া ইউজার তৈরি করা সম্ভব নয়। অনুগ্রহ করে আগে পারমিশন এবং রোল তৈরি করুন।",
-                reply_markup=get_settings_menu()
-            )
-
-    # রোল থাকলে প্রসেস শুরু হবে
-    await message.answer("ইউজারের টেলিগ্রাম আইডি (Telegram ID) লিখুন:")
-    await state.set_state(UserCreateForm.telegram_id)
-
-
-# --- ২. আইডি নেওয়ার পর নাম চাওয়া ---
-@router.message(UserCreateForm.telegram_id)
-async def process_user_tid(message: Message, state: FSMContext):
-    if not message.text.isdigit():
-        return await message.answer("ভুল আইডি! শুধুমাত্র সংখ্যা লিখুন।")
-
-    await state.update_data(telegram_id=int(message.text))
-    await message.answer("ইউজারের নাম লিখুন:")
-    await state.set_state(UserCreateForm.name)
-    return None
-
-
-# --- ৩. নাম নেওয়ার পর ফোন নাম্বার চাওয়া ---
-@router.message(UserCreateForm.name)
-async def process_user_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text)
-    await message.answer("ইউজারের ফোন নাম্বার লিখুন:")
-    await state.set_state(UserCreateForm.phone)
-
-
-# --- ৪. ফোন নাম্বার নেওয়ার পর হাউজ কোড চাওয়া ---
-@router.message(UserCreateForm.phone)
-async def process_user_phone(message: Message, state: FSMContext):
-    # ১. ফোন নাম্বার সেভ করা এবং রোলের জন্য একটি খালি লিস্ট স্টেট-এ রাখা
-    await state.update_data(phone=message.text, selected_roles=[])
-
-    async with async_session() as session:
-        # ২. ডাটাবেজ থেকে সব রোল চেক করা
-        res = await session.execute(select(Role))
-        roles = res.scalars().all()
-
-        # ৩. যদি কোনো রোল তৈরি করা না থাকে
-        if not roles:
-            await state.clear()
-            # সেটিংস মেনু রিটার্ন করা যাতে সুপার এডমিন রোল তৈরি করতে পারে
-            from app.Views.keyboards.reply import get_settings_menu
-            return await message.answer(
-                "⚠️ সিস্টেমে কোনো **রোল (Role)** তৈরি করা নেই!\n"
-                "রোল ছাড়া ইউজার তৈরি করা সম্ভব নয়। অনুগ্রহ করে আগে পারমিশন এবং রোল তৈরি করুন।",
-                reply_markup=get_settings_menu(),
-                parse_mode="Markdown"
-            )
-
-        # ৪. রোল থাকলে মাল্টি-সিলেকশন কিবোর্ড তৈরি করা
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        builder = InlineKeyboardBuilder()
-
-        for r in roles:
-            # শুরুতে সব রোলের পাশে '🔘' থাকবে
-            builder.button(text=f"🔘 {r.name}", callback_data=f"toggle_user_role_{r.id}")
-
-        # ৫. সিলেকশন শেষ করার জন্য 'সেভ' বাটন যোগ করা
-        builder.button(text="✅ সেভ ও এগিয়ে যান", callback_data="save_user_roles")
-        builder.adjust(2)  # প্রতি লাইনে ২টা বাটন
-
-        await message.answer(
-            "ইউজারের জন্য এক বা একাধিক রোল সিলেক্ট করুন:\n"
-            "(সিলেক্ট করতে রোলের ওপর ক্লিক করুন)",
-            reply_markup=builder.as_markup()
-        )
-
-        # ৬. স্টেট পরিবর্তন করে পরবর্তী স্টেপের জন্য প্রস্তুত করা
-        await state.set_state(UserCreateForm.role_id)
-
-
-# ২. রোল টগল হ্যান্ডেলার (টিক চিহ্নের জন্য)
-@router.callback_query(F.data.startswith("toggle_user_role_"))
-async def toggle_user_role(callback: CallbackQuery, state: FSMContext):
-    role_id = int(callback.data.split("_")[3])
-    data = await state.get_data()
-    selected = data.get("selected_roles", [])
-
-    if role_id in selected:
-        selected.remove(role_id)
-    else:
-        selected.append(role_id)
-
-    await state.update_data(selected_roles=selected)
-
-    async with async_session() as session:
-        res = await session.execute(select(Role))
-        all_roles = res.scalars().all()
-        builder = InlineKeyboardBuilder()
-        for r in all_roles:
-            status = "✅" if r.id in selected else "🔘"
-            builder.button(text=f"{status} {r.name}", callback_data=f"toggle_user_role_{r.id}")
-        builder.button(text="✅ সেভ ও এগিয়ে যান", callback_data="save_user_roles")
-        builder.adjust(2)
-        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
-        await callback.answer()
-
-
-# ফাইনাল সেভ লজিক (রোল রিলেশনসহ)
-@router.callback_query(F.data == "save_user_roles")
-async def save_user_roles_step(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    selected_roles = data.get("selected_roles", [])
-
-    if not selected_roles:
-        return await callback.answer("⚠️ অন্তত একটি রোল সিলেক্ট করুন!", show_alert=True)
-
-    # পরের ধাপে নিয়ে যাওয়া
-    await callback.message.answer("হাউজ কোড (House Code) লিখুন: (যার সাথে ইউজারকে যুক্ত করবেন)")
-    await state.set_state(UserCreateForm.house_code)
-    await callback.answer()
-
-
-
-
-@router.callback_query(F.data.startswith("setrole_"))
-async def process_role_selection(callback: CallbackQuery, state: FSMContext):
-    role_id = int(callback.data.split("_")[1])
-    await state.update_data(role_id=role_id)
-    await callback.message.answer("হাউজ কোড (House Code) লিখুন:")
-    await state.set_state(UserCreateForm.house_code)
-
-
-# --- ৫. ফাইনাল ধাপ: ডাটাবেজে সেভ করা ---
-@router.message(UserCreateForm.house_code)
-async def save_user_final(message: Message, state: FSMContext):
-    data = await state.get_data()
-    house_code = message.text
-    role_ids = data.get('selected_roles', [])
-
-    async with async_session() as session:
-        # ১. হাউজ চেক করা
-        house_res = await session.execute(select(House).where(House.code == house_code))
-        house = house_res.scalar_one_or_none()
-
-        if not house:
-            return await message.answer(f"❌ '{house_code}' কোডওয়ালা কোনো হাউজ পাওয়া যায়নি। সঠিক কোড দিন।")
-
-        # ২. সিলেক্ট করা রোল অবজেক্টগুলো ডাটাবেজ থেকে নিয়ে আসা
-        roles_res = await session.execute(select(Role).where(Role.id.in_(role_ids)))
-        roles_list = roles_res.scalars().all()
-
-        # ৩. নতুন ইউজার তৈরি ও রোল অ্যাসাইন করা
-        new_user = User(
-            telegram_id=data['telegram_id'],
-            name=data['name'],
-            phone_number=data['phone'],
-            # roles হচ্ছে relationship, এখানে আমরা অবজেক্টের লিস্ট পাস করছি
-            roles=roles_list
-        )
-
-        session.add(new_user)
-        await session.commit()
-
-    # রোলের নামগুলো সুন্দরভাবে দেখানোর জন্য
-    role_names = ", ".join([r.name for r in roles_list])
-
-    await state.clear()
-    await message.answer(
-        f"✅ ইউজার সফলভাবে তৈরি হয়েছে!\n\n"
-        f"👤 নাম: {data['name']}\n"
-        f"🆔 আইডি: `{data['telegram_id']}`\n"
-        f"📞 ফোন: {data['phone']}\n"
-        f"🎭 রোলস: {role_names}\n"
-        f"🏠 হাউজ: {house.name}",
-        parse_mode="Markdown"
-    )
-    return None
-
-
-# --- ৩. সাবস্ক্রিপশন রিনিউ কমান্ড ---
-
+# --- সাবস্ক্রিপশন রিনিউ কমান্ড ---
 @router.message(Command("renew"))
 async def renew_subscription(message: Message, command: CommandObject):
-    if int(message.from_user.id) != int(SUPER_ADMIN_ID):
+    if int(message.from_user.id) != SUPER_ADMIN_ID:
         return await message.answer("আপনার এই কমান্ড ব্যবহারের অনুমতি নেই।")
-
-    if not command.args:
-        return await message.answer("ব্যবহার পদ্ধতি: `/renew <হাউজ_কোড> <দিন]`", parse_mode="Markdown")
-
+    
+    if not command.args: return await message.answer("উদা: `/renew CODE DAYS`", parse_mode="Markdown")
     try:
         args = command.args.split()
         house_code = args[0]
         days_to_add = int(args[1])
 
         async with async_session() as session:
-            result = await session.execute(select(House).where(House.code == house_code))
-            house = result.scalar_one_or_none()
-
-            if not house:
-                return await message.answer(f"❌ কোড `{house_code}` পাওয়া যায়নি।")
-
-            current_expiry = house.subscription_date or datetime.now()
-            base_date = max(current_expiry, datetime.now())
-            new_expiry = base_date + timedelta(days=days_to_add)
-
-            house.subscription_date = new_expiry
+            h = (await session.execute(select(House).where(House.code == args[0]))).scalar_one_or_none()
+            if not h: return await message.answer(f"❌ কোড `{house_code}` পাওয়া যায়নি।")
+            cur = h.subscription_date or datetime.now()
+            h.subscription_date = max(cur, datetime.now()) + timedelta(days=int(args[1]))
             await session.commit()
 
             await message.answer(
                 f"✅ **সাবস্ক্রিপশন রিনিউ সফল!**\n\n"
-                f"🏠 হাউজ: {house.name}\n"
+                f"🏠 হাউজ: {h.name}\n"
                 f"➕ যোগ করা হয়েছে: {days_to_add} দিন\n"
-                f"📅 নতুন মেয়াদ: {new_expiry.strftime('%d-%m-%Y')}",
+                f"📅 নতুন মেয়াদ: {h.subscription_date.strftime('%d-%m-%Y')}",
                 parse_mode="Markdown"
             )
-            return None
 
-            # await message.answer(f"✅ রিনিউ সফল! নতুন মেয়াদ: {new_expiry.strftime('%d-%m-%Y')}")
-    except Exception as e:
-        await message.answer(f"ভুল ফরম্যাট! /renew CODE DAYS")
+    except: await message.answer("ভুল ফরম্যাট! /renew CODE DAYS")
