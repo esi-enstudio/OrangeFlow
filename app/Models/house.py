@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.Models.base import Base
 
@@ -16,3 +17,6 @@ class House(Base):
     subscription_date = Column(DateTime)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
+
+    # User মডেলের সাথে রিলেশন
+    users = relationship("User", back_populates="house")

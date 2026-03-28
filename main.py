@@ -3,8 +3,9 @@ import logging
 import sys
 from aiogram import Bot, Dispatcher
 from config.settings import BOT_TOKEN
-from app.Controllers import admin_controller, house_controller, role_controller
+from app.Controllers import admin_controller, house_controller, user_controller, role_controller
 from app.Services.db_service import init_db
+from app.Middleware.access_control import ACLMiddleware
 
 # লগিং কনফিগারেশন
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -26,7 +27,9 @@ async def main():
     # ৩. রাউটারগুলো রেজিস্টার করা
     dp.include_router(admin_controller.router)
     dp.include_router(house_controller.router)
+    dp.include_router(user_controller.router)
     dp.include_router(role_controller.router)
+    dp.message.middleware(ACLMiddleware())
 
     # ৪. পুরানো পেন্ডিং মেসেজগুলো স্কিপ করা (বট অফ থাকাকালীন আসা মেসেজ)
     await bot.delete_webhook(drop_pending_updates=True)

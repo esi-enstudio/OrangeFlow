@@ -21,7 +21,7 @@ class PermCreateForm(StatesGroup):
 
 
 # --- ১. পারমিশন তৈরি ---
-@router.message(F.text == "➕ নতুন পারমিশন তৈরি")
+@router.message(F.text == "➕ নতুন পারমিশন তৈরি", flags={"permission": "manage_settings"})
 async def start_perm_creation(message: Message, state: FSMContext):
     await state.clear()
     if int(message.from_user.id) == SUPER_ADMIN_ID:
@@ -40,7 +40,7 @@ async def save_permission(message: Message, state: FSMContext):
 
 
 # --- ২. রোল তৈরি ও পারমিশন সিলেকশন কিবোর্ড ---
-@router.message(F.text == "➕ নতুন রোল তৈরি")
+@router.message(F.text == "➕ নতুন রোল তৈরি", flags={"permission": "manage_settings"})
 async def start_role_creation(message: Message, state: FSMContext):
     # চেক করা হচ্ছে কোনো ফ্ল্যাগ আছে কি না
     data = await state.get_data()
