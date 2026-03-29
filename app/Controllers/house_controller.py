@@ -1,118 +1,492 @@
-from sqlalchemy import select
-from app.Views.keyboards.inline import get_house_list_keyboard
+from datetime import datetime, timedelta
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import Command, CommandObject
+from sqlalchemy import select, func
 from app.Models.house import House
 from app.Services.db_service import async_session
+from app.Views.keyboards.reply import get_house_mgmt_menu
+from app.Views.keyboards.inline import get_house_pagination_kb, get_house_action_kb, get_house_edit_fields_kb
+from config.settings import SUPER_ADMIN_ID
 
 router = Router()
 
-
-# FSM ফরমের ধাপগুলো
+# --- FSM States ---
 class HouseCreateForm(StatesGroup):
-    name = State()
-    code = State()
-    cluster = State()
-    region = State()
+    name, code, cluster, region, email, address, contact = State(), State(), State(), State(), State(), State(), State()
+
+class HouseSearchState(StatesGroup): code = State()
+class HouseUpdateState(StatesGroup): house_id, field, value = State(), State(), State()
 
 
-@router.message(F.text == "📋 হাউজ লিস্ট দেখুন")
-async def show_houses(message: Message):
-    async with async_session() as session:
-        # ডাটাবেজ থেকে সব হাউজ নিয়ে আসা
-        result = await session.execute(select(House))
-        houses = result.scalars().all()
+# --- ১. হাউজ ম্যানেজমেন্ট মেইন মেনু ---
+@router.message(F.text == "🏠 হাউজ ম্যানেজমেন্ট", flags={"permission": "view_houses"})
+async def house_mgmt_menu(message: Message):
+    await message.answer("🏢 হাউজ ম্যানেজমেন্ট অপশন:", reply_markup=get_house_mgmt_menu())
 
-        if not houses:
-            return await message.answer("⚠️ বর্তমানে কোনো হাউজ নিবন্ধিত নেই।")
-
-        response = "🏠 **নিবন্ধিত হাউজ তালিকা**\n"
-        response += "━━━━━━━━━━━━━━━━━━━━\n\n"
-
-        for index, h in enumerate(houses, start=1):
-            response += f"🏢 **হাউজ #{index}**\n"
-            response += f"🔹 নাম: {h.name}\n"
-            response += f"🔑 কোড: `{h.code}`\n"
-            response += f"🌍 ক্লাস্টার: {h.cluster}\n"
-            response += f"📍 রিজিয়ন: {h.region}\n"
-            response += f"📧 ইমেইল: {h.email or 'N/A'}\n"
-            response += f"🏠 ঠিকানা: {h.address or 'N/A'}\n"
-            response += f"📞 কন্টাক্ট: {h.contact or 'N/A'}\n"
-            response += f"📅 মেয়াদ শেষ: {h.subscription_date.strftime('%d-%m-%Y')}\n"
-            response += "────────────────────\n"
-
-        await message.answer(response, parse_mode="Markdown")
-        return None
-
-
-# নির্দিষ্ট হাউজে ক্লিক করলে তার বিস্তারিত তথ্য দেখানো
-@router.callback_query(F.data.startswith("view_house_"))
-async def view_house_details(callback_query):
-    house_id = int(callback_query.data.split("_")[2])
-
-    async with async_session() as session:
-        house = await session.get(House, house_id)
-
-        if house:
-            details = (
-                f"🏠 **হাউজের বিস্তারিত** 🏠\n\n"
-                f"🔹 নাম: {house.name}\n"
-                f"🔹 কোড: {house.code}\n"
-                f"🔹 ক্লাস্টার: {house.cluster}\n"
-                f"🔹 রিজিয়ন: {house.region}\n"
-                f"🔹 ইমেইল: {house.email or 'N/A'}\n"
-                f"🔹 কন্টাক্ট: {house.contact or 'N/A'}\n"
-            )
-            await callback_query.message.answer(details, parse_mode="Markdown")
-        else:
-            await callback_query.answer("হাউজটি খুঁজে পাওয়া যায়নি।")
-
-
-@router.message(F.text == "➕ নতুন হাউজ তৈরি")
+# --- ২. নতুন হাউজ তৈরি (FSM Flow) ---
+@router.message(F.text == "➕ নতুন হাউজ তৈরি", flags={"permission": "create_house"})
 async def start_house_creation(message: Message, state: FSMContext):
-    await message.answer("হাউজের নাম (House Name) লিখুন:")
+    await message.answer("হাউজের নাম লিখুন:")
     await state.set_state(HouseCreateForm.name)
-
 
 @router.message(HouseCreateForm.name)
 async def process_name(message: Message, state: FSMContext):
     await state.update_data(name=message.text)
-    await message.answer("হাউজ কোড (House Code) লিখুন: (উদা: MYMVAI01)")
+    await message.answer("হাউজ কোড লিখুন: (উদা: MYMVAI01)")
     await state.set_state(HouseCreateForm.code)
-
 
 @router.message(HouseCreateForm.code)
 async def process_code(message: Message, state: FSMContext):
     await state.update_data(code=message.text)
-    await message.answer("ক্লাস্টার (Cluster) এর নাম লিখুন: (উদা: East)")
+    await message.answer("ক্লাস্টার লিখুন:")
     await state.set_state(HouseCreateForm.cluster)
-
 
 @router.message(HouseCreateForm.cluster)
 async def process_cluster(message: Message, state: FSMContext):
     await state.update_data(cluster=message.text)
-    await message.answer("রিজিয়ন (Region) এর নাম লিখুন:")
+    await message.answer("রিজিয়ন লিখুন:")
     await state.set_state(HouseCreateForm.region)
 
-
-# ফাইনাল স্টেপ: ডাটাবেজে সেভ করা
 @router.message(HouseCreateForm.region)
-async def save_house(message: Message, state: FSMContext):
-    user_data = await state.get_data()
-    region = message.text
+async def process_region(message: Message, state: FSMContext):
+    await state.update_data(region=message.text)
+    await message.answer("ইমেইল লিখুন:")
+    await state.set_state(HouseCreateForm.email)
 
-    # ডাটাবেজে সেভ করার লজিক
+@router.message(HouseCreateForm.email)
+async def process_email(message: Message, state: FSMContext):
+    await state.update_data(email=message.text)
+    await message.answer("ঠিকানা লিখুন:")
+    await state.set_state(HouseCreateForm.address)
+
+@router.message(HouseCreateForm.address)
+async def process_address(message: Message, state: FSMContext):
+    await state.update_data(address=message.text)
+    await message.answer("কন্টাক্ট নাম্বার লিখুন:")
+    await state.set_state(HouseCreateForm.contact)
+
+@router.message(HouseCreateForm.contact)
+async def save_house_final(message: Message, state: FSMContext):
+    data = await state.get_data()
+    sub_date = datetime.now() + timedelta(days=30)
     async with async_session() as session:
-        new_house = House(
-            name=user_data['name'],
-            code=user_data['code'],
-            cluster=user_data['cluster'],
-            region=region
-        )
-        session.add(new_house)
+        new_h = House(name=data['name'], code=data['code'], cluster=data['cluster'], region=data['region'],
+                      email=data['email'], address=data['address'], contact=message.text, subscription_date=sub_date)
+        session.add(new_h)
         await session.commit()
-
     await state.clear()
-    await message.answer(f"✅ সফলভাবে হাউজ তৈরি হয়েছে!\n\nনাম: {user_data['name']}\nকোড: {user_data['code']}")
+    await message.answer(f"✅ সফলভাবে তৈরি হয়েছে: {data['name']}", reply_markup=get_house_mgmt_menu())
+
+
+# --- ৩. হাউজ লিস্ট (Pagination) ---
+@router.message(F.text == "📋 হাউজ লিস্ট দেখুন", flags={"permission": "view_houses"})
+async def show_house_list(message: Message, page: int = 1):
+    limit = 5
+    offset = (page - 1) * limit
+    async with async_session() as session:
+        total = await session.scalar(select(func.count(House.id)))
+        total_pages = (total + limit - 1) // limit
+        res = await session.execute(select(House).order_by(House.id).offset(offset).limit(limit))
+        houses = res.scalars().all()
+        await message.answer(f"🏢 হাউজ তালিকা (পেজ: {page}/{total_pages}):", 
+                             reply_markup=get_house_pagination_kb(houses, page, total_pages))
+
+@router.callback_query(F.data.startswith("hlist_page_"))
+async def handle_pagination(callback: CallbackQuery):
+    page = int(callback.data.split("_")[2])
+    await callback.message.delete()
+    await show_house_list(callback.message, page)
+
+# --- কমন হেল্পার ফাংশন (তথ্য রেন্ডার করার জন্য) ---
+async def render_house_details(callback: CallbackQuery, house_id: int):
+    async with async_session() as session:
+        h = await session.get(House, house_id)
+        
+        if not h:
+            return await callback.answer("⚠️ হাউজটি পাওয়া যায়নি।", show_alert=True)
+        
+        status = "Active ✅" if h.is_active else "Deactive ❌"
+        details = (
+            f"🏢 **হাউজ বিস্তারিত তথ্য** 🏢\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📛 নাম: {h.name}\n"
+            f"🔑 কোড: `{h.code}`\n"
+            f"🟢 স্ট্যাটাস: {status}\n"
+            f"🌍 ক্লাস্টার: {h.cluster}\n"
+            f"📍 রিজিয়ন: {h.region}\n"
+            f"📧 ইমেইল: {h.email or 'N/A'}\n"
+            f"🏠 ঠিকানা: {h.address or 'N/A'}\n"
+            f"📞 কন্টাক্ট: {h.contact or 'N/A'}\n"
+            f"📅 মেয়াদ শেষ: {h.subscription_date.strftime('%d-%m-%Y')}\n"
+            f"────────────────────"
+        )
+        
+        await callback.message.edit_text(
+            details, 
+            reply_markup=get_house_action_kb(h.id, h.is_active), 
+            parse_mode="Markdown"
+        )
+
+# --- বিস্তারিত বাটন হ্যান্ডেলার (লিস্ট থেকে) ---
+@router.callback_query(F.data.startswith("view_h_"))
+async def view_details_handler(callback: CallbackQuery):
+    # view_h_123 -> ইনডেক্স ২ হলো আইডি
+    h_id = int(callback.data.split("_")[2])
+    await render_house_details(callback, h_id)
+    await callback.answer()
+    
+# --- একটিভ/ডি-একটিভ টগল হ্যান্ডেলার ---
+@router.callback_query(F.data.startswith("toggle_h_status_"))
+async def toggle_status(callback: CallbackQuery):
+    # toggle_h_status_123 -> ইনডেক্স ৩ হলো আইডি
+    h_id = int(callback.data.split("_")[3])
+    
+    async with async_session() as session:
+        h = await session.get(House, h_id)
+        if h:
+            h.is_active = not h.is_active
+            await session.commit()
+            await callback.answer(f"হাউজ এখন {'Active' if h.is_active else 'Deactive'}")
+        else:
+            await callback.answer("হাউজ পাওয়া যায়নি।", show_alert=True)
+            
+    # পুনরায় তথ্য দেখানোর জন্য হেল্পার কল করা
+    await render_house_details(callback, h_id)
+
+
+# --- সার্চ শুরু করা ---
+@router.callback_query(F.data == "search_house_start")
+async def start_house_search(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("🔍 হাউজ কোডটি (House Code) লিখুন:\n(উদা: MYMVAI01)")
+    await state.set_state(HouseSearchState.code)
+    await callback.answer()
+
+# --- সার্চ রেজাল্ট দেখানো ---
+@router.message(HouseSearchState.code)
+async def process_house_search(message: Message, state: FSMContext):
+    search_code = message.text.strip().upper() # বড় হাতের অক্ষরে কনভার্ট করা
+    
+    async with async_session() as session:
+        # ডাটাবেজে কোড অনুযায়ী খোঁজা
+        result = await session.execute(
+            select(House).where(func.upper(House.code) == search_code)
+        )
+        h = result.scalar_one_or_none()
+        
+        if not h:
+            return await message.answer(
+                f"❌ কোড `{search_code}` দিয়ে কোনো হাউজ পাওয়া যায়নি।\nসঠিক কোডটি পুনরায় লিখুন বা /start দিয়ে ফিরে যান।",
+                parse_mode="Markdown"
+            )
+        
+        # হাউজ পাওয়া গেলে তার বিস্তারিত তথ্য এবং অ্যাকশন বাটন দেখানো
+        await state.clear() # সার্চ শেষ, স্টেট ক্লিয়ার
+        
+        status = "Active ✅" if h.is_active else "Deactive ❌"
+        details = (
+            f"🏢 **হাউজ ডিটেইলস (সার্চ রেজাল্ট)** 🔍\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📛 নাম: {h.name}\n"
+            f"🔑 কোড: `{h.code}`\n"
+            f"🟢 স্ট্যাটাস: {status}\n"
+            f"🌍 ক্লাস্টার: {h.cluster}\n"
+            f"📍 রিজিয়ন: {h.region}\n"
+            f"📧 ইমেইল: {h.email or 'N/A'}\n"
+            f"🏠 ঠিকানা: {h.address or 'N/A'}\n"
+            f"📞 কন্টাক্ট: {h.contact or 'N/A'}\n"
+            f"📅 মেয়াদ শেষ: {h.subscription_date.strftime('%d-%m-%Y')}\n"
+            f"────────────────────"
+        )
+        
+        # বিস্তারিত দেখানোর জন্য আগের অ্যাকশন কিবোর্ডটি ব্যবহার করা হয়েছে
+        await message.answer(
+            details, 
+            reply_markup=get_house_action_kb(h.id, h.is_active), 
+            parse_mode="Markdown"
+        )
+
+# --- ১. কোন তথ্যটি আপডেট করতে চান তা দেখানো (মেনু) ---
+@router.callback_query(F.data.startswith("edit_h_info_"))
+async def show_house_edit_menu(callback: CallbackQuery):
+    house_id = int(callback.data.split("_")[3])
+    
+    # ইনলাইন কিবোর্ডটি দেখানো (যেখানে নাম, কোড ইত্যাদি বাটন আছে)
+    await callback.message.edit_text(
+        "🛠 **আপনি হাউজের কোন তথ্যটি আপডেট করতে চান?**",
+        reply_markup=get_house_edit_fields_kb(house_id),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+# --- ২. নির্দিষ্ট ফিল্ড সিলেক্ট করা (যেমন: নাম বা কন্টাক্ট) ---
+@router.callback_query(F.data.startswith("h_edit_"))
+async def process_house_field_selection(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split("_")
+    field_name = parts[2] # name, code, cluster, region, email, address, contact
+    house_id = int(parts[3])
+    
+    # ফিল্ডের নামগুলো বাংলায় সাজানো (ইউজারের সুবিধার জন্য)
+    field_labels = {
+        "name": "নাম", "code": "কোড", "cluster": "ক্লাস্টার",
+        "region": "রিজিয়ন", "email": "ইমেইল", "address": "ঠিকানা", "contact": "কন্টাক্ট"
+    }
+    label = field_labels.get(field_name, "তথ্য")
+    
+    # স্টেট এ তথ্য জমা রাখা
+    await state.update_data(edit_h_id=house_id, edit_h_field=field_name)
+    
+    await callback.message.answer(f"📝 হাউজের নতুন **{label}** লিখে পাঠান:\n(বাতিল করতে চাইলে /start লিখুন)")
+    await state.set_state(HouseUpdateState.value)
+    await callback.answer()
+
+# --- ৩. নতুন ভ্যালু সেভ করা এবং ডাটাবেজ আপডেট ---
+@router.message(HouseUpdateState.value)
+async def save_house_update_final(message: Message, state: FSMContext):
+    data = await state.get_data()
+    house_id = data.get("edit_h_id")
+    field = data.get("edit_h_field")
+    new_val = message.text.strip()
+    
+    async with async_session() as session:
+        # ডাটাবেজ থেকে হাউজটি খুঁজে বের করা
+        h = await session.get(House, house_id)
+        
+        if not h:
+            await state.clear()
+            return await message.answer("❌ এরর: হাউজটি খুঁজে পাওয়া যায়নি।")
+            
+        # ডাইনামিকভাবে কলাম আপডেট করা (সেট-এট্রিবিউট ব্যবহার করে)
+        setattr(h, field, new_val)
+        await session.commit()
+    
+    await state.clear()
+    
+    # আপডেট শেষে একটি কনফার্মেশন মেসেজ
+    await message.answer(
+        f"✅ সফলভাবে হাউজের **{field.capitalize()}** আপডেট করা হয়েছে।\n"
+        f"নতুন তথ্য: `{new_val}`",
+        parse_mode="Markdown"
+    )
+    
+    # পুনরায় লিস্টটি দেখানোর জন্য (ঐচ্ছিক)
+    await show_house_list(message)
+
+
+
+
+# --- ৫. সাবস্ক্রিপশন রিনিউ ---
+@router.message(Command("renew"), flags={"permission": "renew_subscription"})
+async def renew_sub(message: Message, command: CommandObject):
+    if not command.args: return await message.answer("উদা: `/renew CODE DAYS`")
+    try:
+        args = command.args.split()
+        async with async_session() as session:
+            h = (await session.execute(select(House).where(House.code == args[0]))).scalar_one_or_none()
+            if not h: return await message.answer("❌ হাউজ পাওয়া যায়নি।")
+            cur = h.subscription_date or datetime.now()
+            h.subscription_date = max(cur, datetime.now()) + timedelta(days=int(args[1]))
+            await session.commit()
+            await message.answer(f"✅ {h.name} এর মেয়াদ বাড়ানো হয়েছে।")
+    except: await message.answer("ভুল ফরম্যাট!")    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# @router.message(F.text == "📋 হাউজ লিস্ট দেখুন")
+# async def show_houses(message: Message):
+#     async with async_session() as session:
+#         # ডাটাবেজ থেকে সব হাউজ নিয়ে আসা
+#         result = await session.execute(select(House))
+#         houses = result.scalars().all()
+
+#         if not houses:
+#             return await message.answer("⚠️ বর্তমানে কোনো হাউজ নিবন্ধিত নেই।")
+
+#         response = "🏠 **নিবন্ধিত হাউজ তালিকা**\n"
+#         response += "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+#         for index, h in enumerate(houses, start=1):
+#             response += f"🏢 **হাউজ #{index}**\n"
+#             response += f"🔹 নাম: {h.name}\n"
+#             response += f"🔑 কোড: `{h.code}`\n"
+#             response += f"🌍 ক্লাস্টার: {h.cluster}\n"
+#             response += f"📍 রিজিয়ন: {h.region}\n"
+#             response += f"📧 ইমেইল: {h.email or 'N/A'}\n"
+#             response += f"🏠 ঠিকানা: {h.address or 'N/A'}\n"
+#             response += f"📞 কন্টাক্ট: {h.contact or 'N/A'}\n"
+#             response += f"📅 মেয়াদ শেষ: {h.subscription_date.strftime('%d-%m-%Y')}\n"
+#             response += "────────────────────\n"
+
+#         await message.answer(response, parse_mode="Markdown")
+#         return None
+
+
+# # নির্দিষ্ট হাউজে ক্লিক করলে তার বিস্তারিত তথ্য দেখানো
+# @router.callback_query(F.data.startswith("view_house_"))
+# async def view_house_details(callback_query):
+#     house_id = int(callback_query.data.split("_")[2])
+
+#     async with async_session() as session:
+#         house = await session.get(House, house_id)
+
+#         if house:
+#             details = (
+#                 f"🏠 **হাউজের বিস্তারিত** 🏠\n\n"
+#                 f"🔹 নাম: {house.name}\n"
+#                 f"🔹 কোড: {house.code}\n"
+#                 f"🔹 ক্লাস্টার: {house.cluster}\n"
+#                 f"🔹 রিজিয়ন: {house.region}\n"
+#                 f"🔹 ইমেইল: {house.email or 'N/A'}\n"
+#                 f"🔹 কন্টাক্ট: {house.contact or 'N/A'}\n"
+#             )
+#             await callback_query.message.answer(details, parse_mode="Markdown")
+#         else:
+#             await callback_query.answer("হাউজটি খুঁজে পাওয়া যায়নি।")
+
+
+# @router.message(F.text == "➕ নতুন হাউজ তৈরি")
+# async def start_house_creation(message: Message, state: FSMContext):
+#     await message.answer("হাউজের নাম (House Name) লিখুন:")
+#     await state.set_state(HouseCreateForm.name)
+
+
+# @router.message(HouseCreateForm.name)
+# async def process_name(message: Message, state: FSMContext):
+#     await state.update_data(name=message.text)
+#     await message.answer("হাউজ কোড (House Code) লিখুন: (উদা: MYMVAI01)")
+#     await state.set_state(HouseCreateForm.code)
+
+
+# @router.message(HouseCreateForm.code)
+# async def process_code(message: Message, state: FSMContext):
+#     await state.update_data(code=message.text)
+#     await message.answer("ক্লাস্টার (Cluster) এর নাম লিখুন: (উদা: East)")
+#     await state.set_state(HouseCreateForm.cluster)
+
+
+# @router.message(HouseCreateForm.cluster)
+# async def process_cluster(message: Message, state: FSMContext):
+#     await state.update_data(cluster=message.text)
+#     await message.answer("রিজিয়ন (Region) এর নাম লিখুন:")
+#     await state.set_state(HouseCreateForm.region)
+
+
+# # ফাইনাল স্টেপ: ডাটাবেজে সেভ করা
+# @router.message(HouseCreateForm.region)
+# async def save_house(message: Message, state: FSMContext):
+#     user_data = await state.get_data()
+#     region = message.text
+
+#     # ডাটাবেজে সেভ করার লজিক
+#     async with async_session() as session:
+#         new_house = House(
+#             name=user_data['name'],
+#             code=user_data['code'],
+#             cluster=user_data['cluster'],
+#             region=region
+#         )
+#         session.add(new_house)
+#         await session.commit()
+
+#     await state.clear()
+#     await message.answer(f"✅ সফলভাবে হাউজ তৈরি হয়েছে!\n\nনাম: {user_data['name']}\nকোড: {user_data['code']}")
+
+
+
+# # --- ১. হাউজ লিস্ট (পেজিনেশনসহ) ---
+# @router.message(F.text == "📋 হাউজ লিস্ট দেখুন", flags={"permission": "view_houses"})
+# async def show_house_list(message: Message, page: int = 1):
+#     limit = 5
+#     offset = (page - 1) * limit
+#     async with async_session() as session:
+#         total = await session.scalar(select(func.count(House.id)))
+#         total_pages = (total + limit - 1) // limit
+#         res = await session.execute(select(House).order_by(House.id).offset(offset).limit(limit))
+#         houses = res.scalars().all()
+        
+#         kb = get_house_pagination_kb(houses, page, total_pages)
+#         await message.answer(f"🏢 **হাউজ তালিকা (পেজ: {page}/{total_pages})**", reply_markup=kb, parse_mode="Markdown")
+
+# @router.callback_query(F.data.startswith("hlist_page_"))
+# async def handle_pagination(callback: CallbackQuery):
+#     page = int(callback.data.split("_")[2])
+#     await callback.message.delete()
+#     await show_house_list(callback.message, page)
+
+# # --- ২. হাউজ বিস্তারিত ও একটিভ/ডি-একটিভ টগল ---
+# @router.callback_query(F.data.startswith("view_h_"))
+# async def view_house_details(callback: CallbackQuery):
+#     house_id = int(callback.data.split("_")[2])
+#     async with async_session() as session:
+#         h = await session.get(House, house_id)
+#         status = "✅ Active" if h.is_active else "❌ Deactive"
+#         details = (f"🏢 **হাউজ বিস্তারিত**\n━━━━━━━━━━━━\n"
+#                    f"🔹 নাম: {h.name}\n🔹 কোড: `{h.code}`\n🔹 স্ট্যাটাস: {status}\n"
+#                    f"🌍 ক্লাস্টার: {h.cluster}\n📍 রিজিয়ন: {h.region}\n📧 ইমেইল: {h.email or 'N/A'}\n"
+#                    f"🏠 ঠিকানা: {h.address or 'N/A'}\n📞 কন্টাক্ট: {h.contact or 'N/A'}")
+#         await callback.message.edit_text(details, reply_markup=get_house_action_kb(h.id, h.is_active), parse_mode="Markdown")
+
+# @router.callback_query(F.data.startswith("toggle_h_status_"))
+# async def toggle_house_status(callback: CallbackQuery):
+#     house_id = int(callback.data.split("_")[3])
+#     async with async_session() as session:
+#         h = await session.get(House, house_id)
+#         h.is_active = not h.is_active
+#         await session.commit()
+#         await callback.answer(f"হাউজ এখন {'Active' if h.is_active else 'Deactive'}", show_alert=True)
+#     await view_house_details(callback)
+
+# # --- ৩. হাউজ তথ্য এডিট লজিক (সকল ফিল্ড) ---
+# @router.callback_query(F.data.startswith("edit_h_info_"))
+# async def show_edit_options(callback: CallbackQuery):
+#     house_id = int(callback.data.split("_")[3])
+#     await callback.message.edit_text("কোন তথ্যটি আপডেট করতে চান?", reply_markup=get_house_edit_fields_kb(house_id))
+
+# @router.callback_query(F.data.startswith("h_edit_"))
+# async def process_edit_selection(callback: CallbackQuery, state: FSMContext):
+#     parts = callback.data.split("_")
+#     field = parts[2] # name, code, cluster etc.
+#     house_id = int(parts[3])
+    
+#     await state.update_data(house_id=house_id, field=field)
+#     await callback.message.answer(f"হাউজের নতুন **{field.capitalize()}** লিখে পাঠান:")
+#     await state.set_state(HouseUpdateState.value)
+#     await callback.answer()
+
+# @router.message(HouseUpdateState.value)
+# async def save_house_edit(message: Message, state: FSMContext):
+#     data = await state.get_data()
+#     async with async_session() as session:
+#         h = await session.get(House, data['house_id'])
+        
+#         # ডাইনামিকভাবে ফিল্ড আপডেট করা
+#         setattr(h, data['field'], message.text)
+#         await session.commit()
+        
+#     await state.clear()
+#     await message.answer(f"✅ সফলভাবে **{data['field']}** আপডেট করা হয়েছে।")
+#     # পুনরায় লিস্ট দেখানোর জন্য (ঐচ্ছিক)
+#     await show_house_list(message)
+
+# # --- ৪. হাউজ কোড দিয়ে সার্চ ---
+# @router.message(HouseSearchState.code)
+# async def process_search(message: Message, state: FSMContext):
+#     async with async_session() as session:
+#         h = (await session.execute(select(House).where(func.lower(House.code) == message.text.lower()))).scalar_one_or_none()
+#         if not h: return await message.answer("❌ এই কোড দিয়ে কোনো হাউজ পাওয়া যায়নি!")
+#         await state.clear()
+#         await message.answer(f"🔍 হাউজ পাওয়া গেছে: {h.name}", reply_markup=get_house_action_kb(h.id, h.is_active))
