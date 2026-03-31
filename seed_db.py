@@ -86,7 +86,7 @@ async def seed_data():
         
         users_to_create = [
             {
-                "telegram_id": 8653346171, "name": "এমিল", "phone_number": "01732547755", 
+                "telegram_id": 6906339644, "name": "এমিল", "phone_number": "01732547755", 
                 "house_id": patwary_house.id, "role_name": "Manager"
             }
         ]

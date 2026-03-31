@@ -85,7 +85,10 @@ async def run_sim_status_check(serials: list, credentials: dict):
                             sim = data.get("SIM No", "").strip()
                             if sim and sim not in scanned_sims:
                                 scanned_sims.add(sim)
-                                results.append(format_sim_data(data, house_name))
+                                # আমরা পুরো ডিকশনারিটি জমা রাখবো প্রসেসিং এর জন্য
+                                data['MSISDN'] = data.get("MSISDN", data.get("Mobile No", "N/A"))
+                                results.append(data)
+                                # results.append(format_sim_data(data, house_name))
                     break
 
                 # --- কেস ২: টেবিল ভিউ ---
@@ -94,20 +97,32 @@ async def run_sim_status_check(serials: list, credentials: dict):
                     rows = multi_table.find("tbody").find_all("tr")
                     for row in rows:
                         cols = row.find_all("td")
-                        if len(cols) < 9 or "No data" in cols[0].text: continue
+                        if len(cols) < 10 or "No data" in cols[0].text: continue
                         
                         sim = cols[0].text.strip().replace("'", "")
-                        if sim in scanned_sims: continue
                         
-                        scanned_sims.add(sim)
-                        temp_data = {
-                            "SIM No": sim,
-                            "Distributor": cols[1].text.strip(),
-                            "Retailer": cols[2].text.strip(),
-                            "Activation Date": cols[8].text.strip(),
-                            "Activation Status": "Active" if cols[8].text.strip() else ""
-                        }
-                        results.append(format_sim_data(temp_data, house_name))
+                        if sim not in scanned_sims:
+                            scanned_sims.add(sim)
+                            temp_data = {
+                                "SIM No": sim,
+                                "Distributor": cols[1].text.strip(),
+                                "Retailer": cols[2].text.strip(),
+                                "Activation Date": cols[8].text.strip(),
+                                "MSISDN": cols[9].text.strip() # MSISDN এখন ৯ নম্বর ইনডেক্সে
+                            }
+                            results.append(temp_data)
+
+                        # if sim in scanned_sims: continue
+                        
+                        # scanned_sims.add(sim)
+                        # temp_data = {
+                        #     "SIM No": sim,
+                        #     "Distributor": cols[1].text.strip(),
+                        #     "Retailer": cols[2].text.strip(),
+                        #     "Activation Date": cols[8].text.strip(),
+                        #     "Activation Status": "Active" if cols[8].text.strip() else ""
+                        # }
+                        # results.append(format_sim_data(temp_data, house_name))
 
                 # --- পেজিনেশন চেক করা ---
                 next_btn = await page.query_selector("#dataTable_Smart_Search_Report_next")
@@ -124,22 +139,81 @@ async def run_sim_status_check(serials: list, credentials: dict):
         finally:
             await browser.close()
 
-    return "\n\n".join(results) if results else "⚠️ কোনো তথ্য পাওয়া যায়নি।"
+    # return "\n\n".join(results) if results else "⚠️ কোনো তথ্য পাওয়া যায়নি।"
+    return generate_sim_summary(results, house_name)
 
-def format_sim_data(data: dict, target_house: str):
-    """মেসেজ ফরম্যাটিং লজিক"""
-    sim = data.get("SIM No", "").strip()
-    house = data.get("Distributor", "N/A")
-    ret = data.get("Retailer", "").strip()
-    act_date = data.get("Activation Date", "").strip()
-    status = data.get("Activation Status", "").strip()
+def generate_sim_summary(all_data, target_house):
+    active_map = {} # Date -> List of strings
+    issued_map = {} # Retailer -> List of strings
+    ready_list = []
+    errors = []
 
-    if target_house and target_house not in house:
-        return f"❌ `{sim}`: এটি {house} হাউসের সিম। আপনার হাউস {target_house}-এ এটি প্রসেস করা সম্ভব নয়।"
+    for d in all_data:
+        sim = d.get("SIM No", "")
+        house = d.get("Distributor", "")
+        retailer = d.get("Retailer", "")
+        act_date = d.get("Activation Date", "")
+        msisdn = d.get("MSISDN", "")
+
+        # হাউজ চেক
+        if target_house and target_house not in house:
+            errors.append(f"❌ `{sim}`: এটি {house} হাউসের সিম।")
+            continue
+
+        if act_date: # ১. এক্টিভ সিম (🟢)
+            if act_date not in active_map: active_map[act_date] = []
+            # নাম্বার যদি ১০ ডিজিট হয় তবে সামনে ০ যোগ করা
+            clean_msisdn = f"0{msisdn}" if len(msisdn) == 10 else msisdn
+            active_map[act_date].append(f"🟢 {sim}\n📱 {clean_msisdn}")
+            
+        elif retailer and retailer.strip(): # ২. ইস্যু করা (🟡)
+            if retailer not in issued_map: issued_map[retailer] = []
+            issued_map[retailer].append(f"🟡 {sim}")
+            
+        else: # ৩. ইস্যু হয় নাই (⚪)
+            ready_list.append(f"⚪ {sim}")
+
+    # --- মেসেজ ফরম্যাটিং ---
+    final_output = []
+
+    # এক্টিভ সিম সেকশন (তারিখ অনুযায়ী)
+    for date, lines in active_map.items():
+        final_output.append("\n".join(lines))
+        final_output.append(f"📅 {date}\n")
+
+    # ইস্যু করা সিম সেকশন (রিটেইলার অনুযায়ী)
+    if issued_map:
+        if final_output: final_output.append("----------------------------")
+        for ret, sims in issued_map.items():
+            final_output.append("\n".join(sims))
+            final_output.append(f"••••••••••••••••••••••\n🏪 {ret}\n")
+
+    # রেডি সিম সেকশন
+    if ready_list:
+        if final_output: final_output.append("")
+        final_output.append("\n".join(ready_list))
+
+    # এরর সেকশন
+    if errors:
+        final_output.append("\n" + "\n".join(errors))
+
+    return "\n".join(final_output) if final_output else "⚠️ কোনো তথ্য পাওয়া যায়নি।"
+
+
+# def format_sim_data(data: dict, target_house: str):
+#     """মেসেজ ফরম্যাটিং লজিক"""
+#     sim = data.get("SIM No", "").strip()
+#     house = data.get("Distributor", "N/A")
+#     ret = data.get("Retailer", "").strip()
+#     act_date = data.get("Activation Date", "").strip()
+#     status = data.get("Activation Status", "").strip()
+
+#     if target_house and target_house not in house:
+#         return f"❌ `{sim}`: এটি {house} হাউসের সিম। আপনার হাউস {target_house}-এ এটি প্রসেস করা সম্ভব নয়।"
     
-    if status == "Active" or act_date:
-        return f"❌ `{sim}`: একটিভ।\n👤 রিটেইলার: {ret}\n🏠 হাউস: {house}\n📅 তারিখ: {act_date}"
-    elif ret and ret != "" and "Select" not in ret:
-        return f"⚠️ `{sim}`: ইস্যু করা আছে।\n👤 রিটেইলার: {ret}\n🏠 হাউস: {house}"
-    else:
-        return f"✅ `{sim}`: ইস্যু করার জন্য প্রস্তুত।\n🏠 হাউস: {house}"
+#     if status == "Active" or act_date:
+#         return f"❌ `{sim}`: একটিভ।\n👤 রিটেইলার: {ret}\n🏠 হাউস: {house}\n📅 তারিখ: {act_date}"
+#     elif ret and ret != "" and "Select" not in ret:
+#         return f"⚠️ `{sim}`: ইস্যু করা আছে।\n👤 রিটেইলার: {ret}\n🏠 হাউস: {house}"
+#     else:
+#         return f"✅ `{sim}`: ইস্যু করার জন্য প্রস্তুত।\n🏠 হাউস: {house}"

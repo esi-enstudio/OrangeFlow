@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.Models.user import User
 from app.Services.Automation.Tasks.sim_status import run_sim_status_check
 from app.Services.db_service import async_session
+from app.Utils.validators import validate_and_expand_serials
 
 router = Router()
 
@@ -16,7 +17,7 @@ router = Router()
 class SIMStatusForm(StatesGroup):
     serials = State()
 
-# --- ১. ইনলাইন বাটন থেকে টাস্ক শুরু ---
+# --- ইনলাইন বাটন থেকে টাস্ক শুরু ---
 @router.callback_query(F.data == "run_sim_status", flags={"permission": "task_sim_status"})
 async def trigger_sim_status(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
@@ -26,23 +27,25 @@ async def trigger_sim_status(callback: CallbackQuery, state: FSMContext):
     await state.set_state(SIMStatusForm.serials)
     await callback.answer()
 
-# --- ২. সিরিয়াল ইনপুট প্রসেসিং এবং অটোমেশন কল ---
+# --- সিরিয়াল ইনপুট প্রসেসিং এবং অটোমেশন কল ---
 @router.message(SIMStatusForm.serials, flags={"permission": "task_sim_status"})
 async def process_sim_serials(message: Message, state: FSMContext):
-    serials_text = message.text.strip()
-    if not serials_text:
-        return await message.answer("⚠️ অনুগ্রহ করে অন্তত একটি সিম সিরিয়াল লিখে পাঠান।")
+    # ১. ভ্যালিডেশন এবং এক্সপান্ড কল করা (এটি সিরিয়াল লিস্টও রিটার্ন করে)
+    serials, invalid_lines, error_msg = validate_and_expand_serials(message.text)
     
-    serials = [s.strip() for s in serials_text.split("\n") if s.strip()]
-    
+    # যদি ফরম্যাট ভুল হয় বা লিমিট ক্রস করে
+    if error_msg:
+        return await message.answer(error_msg, parse_mode="Markdown")
+
+    # ২. ইউজারকে একবারই প্রসেসিং মেসেজ দেওয়া
     processing_msg = await message.answer(
-        f"⏳ **প্রসেসিং শুরু হয়েছে...**\n🔍 মোট {len(serials)}টি সিরিয়াল চেক করা হচ্ছে।",
+        f"⏳ **প্রসেসিং শুরু হয়েছে...**\n🔍 মোট {len(serials)}টি সিম চেক করা হচ্ছে।",
         parse_mode="Markdown"
     )
 
     try:
         async with async_session() as session:
-            # হাউজের সকল DMS তথ্য লোড করা
+            # ৩. হাউজের DMS তথ্য ডাটাবেজ থেকে লোড করা
             result = await session.execute(
                 select(User).options(selectinload(User.house)).where(User.telegram_id == message.from_user.id)
             )
@@ -52,19 +55,10 @@ async def process_sim_serials(message: Message, state: FSMContext):
                 return await processing_msg.edit_text("❌ আপনার সাথে কোনো হাউজ যুক্ত নেই।")
 
             house = user.house
-
-            # --- ডিবাগ প্রিন্ট (টার্মিনালে দেখবেন) ---
-            # print(f"DEBUG: Data fetched from DB:")
-            # print(f" - House Name: {house.name}")
-            # print(f" - DMS User: {house.dms_user}")
-            # print(f" - DMS Pass: {'****' if house.dms_pass else 'Empty'}")
-            # print(f" - DMS House ID: {house.dms_house_id}")
-
-
             
-            # চেক করা হচ্ছে হাউজের DMS তথ্য আছে কি না
-            if not house.dms_user or not house.dms_pass or not house.dms_house_id:
-                return await processing_msg.edit_text("❌ এই হাউজের জন্য ডিএমএস ক্রেডেনশিয়াল (User, Pass, ID) সেট করা নেই। এডমিনকে দিয়ে সেট করান।")
+            # DMS তথ্য চেক করা
+            if not all([house.dms_user, house.dms_pass, house.dms_house_id]):
+                return await processing_msg.edit_text(f"❌ হাউজ '{house.name}' এর জন্য DMS Credentials সেট করা নেই।")
 
             # অটোমেশনের জন্য ক্রেডেনশিয়াল ডিকশনারি
             credentials = {
@@ -74,16 +68,16 @@ async def process_sim_serials(message: Message, state: FSMContext):
                 "house_name": house.name
             }
 
-        # প্লে-রাইট অটোমেশন কল করা (এখন credentials পাস হচ্ছে)
+        # ৪. প্লে-রাইট অটোমেশন কল করা
         automation_result = await run_sim_status_check(serials, credentials)
 
-        # মেসেজ এডিট না করে নতুন মেসেজ পাঠানো নিরাপদ (আইডি এরর এড়াতে)
+        # ৫. প্রসেসিং মেসেজ ডিলিট করা
         try:
             await processing_msg.delete()
         except:
             pass
 
-        # Markdown এরর এড়াতে সিম্পল টেক্সট অথবা HTML ব্যবহার
+        # ৬. রেজাল্ট পাঠানো (টেলিগ্রাম লিমিট হ্যান্ডেল করে)
         if len(automation_result) > 4000:
             for i in range(0, len(automation_result), 4000):
                 await message.answer(automation_result[i:i+4000])
@@ -91,9 +85,9 @@ async def process_sim_serials(message: Message, state: FSMContext):
             await message.answer(f"📊 **সার্চ রেজাল্ট:**\n\n{automation_result}")
 
     except Exception as e:
-        # এরর মেসেজটি স্ট্রিং হিসেবে পাঠানো
-        error_text = str(e).replace("_", " ") # আন্ডারস্কোর Markdown ব্রেক করে
+        error_text = str(e).replace("_", " ") 
         await message.answer(f"❌ এরর হয়েছে: {error_text}")
         
     finally:
+        # FSM স্টেট ক্লিয়ার করা
         await state.clear()
