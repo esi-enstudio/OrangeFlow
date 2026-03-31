@@ -54,11 +54,11 @@ async def process_sim_serials(message: Message, state: FSMContext):
             house = user.house
 
             # --- ডিবাগ প্রিন্ট (টার্মিনালে দেখবেন) ---
-            print(f"DEBUG: Data fetched from DB:")
-            print(f" - House Name: {house.name}")
-            print(f" - DMS User: {house.dms_user}")
-            print(f" - DMS Pass: {'****' if house.dms_pass else 'Empty'}")
-            print(f" - DMS House ID: {house.dms_house_id}")
+            # print(f"DEBUG: Data fetched from DB:")
+            # print(f" - House Name: {house.name}")
+            # print(f" - DMS User: {house.dms_user}")
+            # print(f" - DMS Pass: {'****' if house.dms_pass else 'Empty'}")
+            # print(f" - DMS House ID: {house.dms_house_id}")
 
 
             

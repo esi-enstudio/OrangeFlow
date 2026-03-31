@@ -6,6 +6,7 @@ from config.settings import BOT_TOKEN
 from app.Services.db_service import init_db
 from app.Middleware.access_control import ACLMiddleware
 from app.Core.webhook_server import start_webhook_server
+from app.Core.session_pinger import session_keeper_task
 
 # কন্ট্রোলার ইম্পোর্ট
 from app.Controllers import (
@@ -50,19 +51,24 @@ async def main():
     dp.include_router(automation_controller.router)
     dp.include_router(sim_status_controller.router)
 
-    # ৫. পুরানো পেন্ডিং মেসেজগুলো স্কিপ করা
+    # পুরানো পেন্ডিং মেসেজগুলো স্কিপ করা
     await bot.delete_webhook(drop_pending_updates=True)
 
     try:
-        # ৬. ওটিপি রিসিভার এবং এনগ্রোক সার্ভার চালু করা (একবারই কল হবে)
+        # ওটিপি রিসিভার এবং এনগ্রোক সার্ভার চালু করা (একবারই কল হবে)
         asyncio.create_task(start_webhook_server(port=8080))
 
+        # সেশন কিপার (Keep-Alive) ব্যাকগ্রাউন্ড টাস্ক চালু করা 🆕
+        asyncio.create_task(session_keeper_task())
+
         print("🤖 বট এবং ওটিপি সার্ভার সচল হয়েছে...")
+        print("💓 সেশন কিপার ব্যাকগ্রাউন্ডে চালু হয়েছে (৪ মিনিট অন্তর চেক করবে)।")
+        
         await dp.start_polling(bot)
     except Exception as e:
         print(f"❌ বট চলাকালীন সমস্যা: {e}")
     finally:
-        # ৭. ক্লিন শাটডাউন
+        # ক্লিন শাটডাউন
         await bot.session.close()
 
 if __name__ == "__main__":

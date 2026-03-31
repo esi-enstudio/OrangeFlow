@@ -9,6 +9,19 @@ class DMSLoginManager:
     def __init__(self):
         self.login_url = "https://blkdms.banglalink.net/Account/Login"
 
+    async def get_browser_context(self, playwright, session_path: str):
+        """সেশন ফাইলসহ ব্রাউজার এবং কন্টেক্সট জেনারেট করার ফাংশন"""
+        # ব্যাকগ্রাউন্ডে চলার জন্য headless=True রাখা হয়েছে
+        browser = await playwright.chromium.launch(headless=True)
+        
+        # যদি ওই হাউজের আগে কোনো সেশন সেভ করা থাকে তবে সেটি লোড করবে
+        if os.path.exists(session_path):
+            context = await browser.new_context(storage_state=session_path)
+        else:
+            context = await browser.new_context()
+        
+        return browser, context
+    
     async def is_session_valid(self, page):
         """সেশন সচল আছে কি না তা একটি সুরক্ষিত পেজে গিয়ে চেক করা"""
         try:
