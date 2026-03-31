@@ -3,51 +3,71 @@ import logging
 import sys
 from aiogram import Bot, Dispatcher
 from config.settings import BOT_TOKEN
-from app.Controllers import admin_controller, house_controller, user_controller, role_controller
 from app.Services.db_service import init_db
 from app.Middleware.access_control import ACLMiddleware
+from app.Core.webhook_server import start_webhook_server
 
-# লগিং কনফিগারেশন
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# কন্ট্রোলার ইম্পোর্ট
+from app.Controllers import (
+    admin_controller,
+    house_controller,
+    user_controller,
+    role_controller,
+    automation_controller, 
+    sim_status_controller
+)
+
+# --- ১. লগিং কনফিগারেশন (সাইলেন্ট মুড) ---
+# মেইন লেভেল ERROR করা হয়েছে যাতে অপ্রয়োজনীয় INFO না আসে
+logging.basicConfig(level=logging.ERROR) 
+
+# লাইব্রেরিগুলোর ইন্টারনাল লগ পুরোপুরি বন্ধ করা
+logging.getLogger("aiogram").setLevel(logging.ERROR)
+logging.getLogger("pyngrok").setLevel(logging.ERROR)
+logging.getLogger("aiohttp").setLevel(logging.ERROR)
 
 async def main():
-    # ১. ডাটাবেজ এবং টেবিল তৈরি নিশ্চিত করা
+    # ২. ডাটাবেজ এবং টেবিল তৈরি নিশ্চিত করা
     try:
         await init_db()
-        logger.info("ডাটাবেজ কানেকশন সফল হয়েছে।")
+        print("✅ ডাটাবেজ কানেকশন সফল।")
     except Exception as e:
-        logger.error(f"ডাটাবেজ কানেকশন এরর: {e}")
+        print(f"❌ ডাটাবেজ কানেকশন এরর: {e}")
         return
 
-    # ২. বট এবং ডিসপ্যাচার সেটআপ
+    # ৩. বট এবং ডিসপ্যাচার সেটআপ
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
 
-    # ৩. রাউটারগুলো রেজিস্টার করা
+    # ৪. মিডলওয়্যার এবং রাউটারগুলো রেজিস্টার করা
+    # মিডলওয়্যারকে রাউটারগুলোর আগে রাখতে হয়
+    dp.message.middleware(ACLMiddleware())
+    
     dp.include_router(admin_controller.router)
     dp.include_router(house_controller.router)
     dp.include_router(user_controller.router)
     dp.include_router(role_controller.router)
-    dp.message.middleware(ACLMiddleware())
+    dp.include_router(automation_controller.router)
+    dp.include_router(sim_status_controller.router)
 
-    # ৪. পুরানো পেন্ডিং মেসেজগুলো স্কিপ করা (বট অফ থাকাকালীন আসা মেসেজ)
+    # ৫. পুরানো পেন্ডিং মেসেজগুলো স্কিপ করা
     await bot.delete_webhook(drop_pending_updates=True)
 
     try:
-        logger.info("বট চালু হয়েছে এবং মেসেজ শোনার জন্য প্রস্তুত...")
+        # ৬. ওটিপি রিসিভার এবং এনগ্রোক সার্ভার চালু করা (একবারই কল হবে)
+        asyncio.create_task(start_webhook_server(port=8080))
+
+        print("🤖 বট এবং ওটিপি সার্ভার সচল হয়েছে...")
         await dp.start_polling(bot)
     except Exception as e:
-        logger.error(f"বট চলাকালীন সমস্যা হয়েছে: {e}")
+        print(f"❌ বট চলাকালীন সমস্যা: {e}")
     finally:
-        # ৫. ক্লিন শাটডাউন
+        # ৭. ক্লিন শাটডাউন
         await bot.session.close()
-        logger.info("বট সেশন ক্লোজ করা হয়েছে।")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        # Ctrl+C চাপলে এই অংশটি এরর না দেখিয়ে সুন্দরভাবে বন্ধ হবে
-        logger.info("ইউজার দ্বারা বট বন্ধ করা হয়েছে।")
+        print("\n👋 ইউজার দ্বারা বট বন্ধ করা হয়েছে।")
         sys.exit(0)

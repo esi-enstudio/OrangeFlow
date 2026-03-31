@@ -14,6 +14,12 @@ class House(Base):
     email = Column(String)
     address = Column(String)
     contact = Column(String)
+
+    # DMS Credentials
+    dms_user = Column(String, nullable=True)
+    dms_pass = Column(String, nullable=True)
+    dms_house_id = Column(String, nullable=True)
+
     subscription_date = Column(DateTime)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, server_default=func.now())

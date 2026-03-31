@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from app.Services.db_service import async_session
 from app.Models.user import User
+from app.Models.role import Role, Permission # Permission মডেল ইম্পোর্ট করুন
 from config.settings import SUPER_ADMIN_ID
 
 class ACLMiddleware(BaseMiddleware):
@@ -15,38 +16,42 @@ class ACLMiddleware(BaseMiddleware):
         event: Message,
         data: Dict[str, Any]
     ) -> Any:
-        # ১. হ্যান্ডলার থেকে পারমিশন ফ্ল্যাগ চেক করা (যেমন: view_houses)
-        required_permission = get_flag(data, "permission")
-        
-        # যদি কোনো পারমিশন দরকার না হয় (যেমন: পাবলিক কমান্ড), তবে সরাসরি পাস করবে
-        if not required_permission:
-            return await handler(event, data)
-
         user_id = event.from_user.id
+        required_permission = get_flag(data, "permission")
 
-        # ২. সুপার এডমিন চেক (সুপার এডমিনের সব পারমিশন আছে)
+        # ১. সুপার এডমিনের জন্য সব পারমিশন লোড করা
         if int(user_id) == int(SUPER_ADMIN_ID):
+            async with async_session() as session:
+                # সিস্টেমের সব পারমিশন নাম নিয়ে আসা
+                all_perms_res = await session.execute(select(Permission.name))
+                all_perms = [p[0] for p in all_perms_res.all()]
+                data["permissions"] = all_perms # সুপার এডমিনকে সব পারমিশন দিয়ে দেওয়া হলো
             return await handler(event, data)
 
-        # ৩. ডাটাবেজ থেকে ইউজার এবং তার পারমিশন লোড করা
+        # ২. সাধারণ ইউজারের জন্য ডাটাবেজ থেকে চেক করা
         async with async_session() as session:
             result = await session.execute(
                 select(User)
-                .options(selectinload(User.role).selectinload(r.permissions)) # গভীর থেকে লোড করা
+                .options(selectinload(User.roles).selectinload(Role.permissions))
                 .where(User.telegram_id == user_id)
             )
             user = result.scalar_one_or_none()
 
-            # ইউজার বা রোল না থাকলে ব্লক করা
-            if not user or not user.role:
-                return await event.answer("🚫 আপনি নিবন্ধিত ইউজার নন। এডমিনের সাথে যোগাযোগ করুন।")
+            if not user or not user.roles:
+                # /start কমান্ড ছাড়া অন্য কিছু হলে আটকে দিবে
+                if event.text == "/start": return await handler(event, data)
+                return await event.answer("🚫 আপনি নিবন্ধিত নন অথবা আপনার কোনো রোল নেই।")
 
-            # ইউজারের পারমিশন লিস্ট তৈরি
-            user_permissions = [p.name for p in user.role.permissions]
+            # ইউজারের সব রোল থেকে পারমিশনগুলো সংগ্রহ করা
+            user_permissions = []
+            for role in user.roles:
+                for perm in role.permissions:
+                    user_permissions.append(perm.name)
             
-            # ৪. কাঙ্খিত পারমিশন চেক করা
-            if required_permission not in user_permissions:
-                return await event.answer(f"❌ আপনার এই কাজটি করার পারমিশন নেই। (প্রয়োজন: {required_permission})")
+            data["permissions"] = list(set(user_permissions)) # ডুপ্লিকেট বাদ দিয়ে ডাটাতে পাঠানো
 
-        # সব ঠিক থাকলে হ্যান্ডলার কল করা
+            # ৩. যদি ফ্ল্যাগ থাকে, তবে পারমিশন চেক করা
+            if required_permission and required_permission not in user_permissions:
+                return await event.answer(f"❌ আপনার এই কাজের অনুমতি নেই। (প্রয়োজন: {required_permission})")
+
         return await handler(event, data)

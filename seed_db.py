@@ -14,7 +14,7 @@ async def seed_data():
         permissions_list = [
             "view_houses", "create_house", "renew_subscription", "view_users", 
             "create_user", "edit_user", "delete_user", "manage_settings", 
-            "sim_status_check", "sim_issue", "sim_return", "ga_live", "itopup_replace"
+            "sim_status_check", "sim_issue", "sim_return", "ga_live", "itopup_replace", "dms_access", "task_sim_status", "task_sim_issue", "task_sim_return"
         ]
         
         db_perms = {}

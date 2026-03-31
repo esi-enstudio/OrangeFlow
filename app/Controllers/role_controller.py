@@ -6,6 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 from app.Models.role import Role, Permission
 from app.Services.db_service import async_session
+from sqlalchemy.orm import selectinload
 from config.settings import SUPER_ADMIN_ID
 
 router = Router()
@@ -148,6 +149,47 @@ async def save_role_final(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer(f"✅ রোল '{role_name}' সফলভাবে তৈরি হয়েছে।")
 
     await callback.answer()
+
+@router.message(F.text == "📋 রোল ও পারমিশন লিস্ট", flags={"permission": "manage_settings"})
+async def show_roles_and_permissions(message: Message):
+    async with async_session() as session:
+        # ১. সব রোল এবং তাদের পারমিশন লোড করা
+        roles_result = await session.execute(
+            select(Role).options(selectinload(Role.permissions))
+        )
+        roles = roles_result.scalars().all()
+
+        # ২. সব আলাদা পারমিশন লোড করা (সিস্টেমে মোট কয়টি আছে দেখার জন্য)
+        perms_result = await session.execute(select(Permission))
+        all_permissions = perms_result.scalars().all()
+
+        if not roles and not all_permissions:
+            return await message.answer("⚠️ সিস্টেমে কোনো রোল বা পারমিশন তৈরি করা নেই।")
+
+        # ৩. মেসেজ ফরমেটিং
+        response = "🔐 **সিস্টেম এক্সেস কন্ট্রোল লিস্ট**\n"
+        response += "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+        # রোল ও তাদের পারমিশন সেকশন
+        response += "🎭 **রোল ভিত্তিক পারমিশন:**\n"
+        if roles:
+            for r in roles:
+                p_list = ", ".join([f"`{p.name}`" for p in r.permissions]) if r.permissions else "_কোনো পারমিশন নেই_"
+                response += f"🔹 **{r.name}**\n┗ 🛠 {p_list}\n\n"
+        else:
+            response += "_কোনো রোল নেই_\n\n"
+
+        response += "────────────────────\n"
+        
+        # সব পারমিশনের লিস্ট সেকশন
+        response += "🔑 **সিস্টেমের সকল পারমিশন:**\n"
+        if all_permissions:
+            p_names = ", ".join([f"`{p.name}`" for p in all_permissions])
+            response += f"⚙️ {p_names}\n"
+        else:
+            response += "_কোনো পারমিশন তৈরি করা নেই_"
+
+        await message.answer(response, parse_mode="Markdown")
 
 
 # এই বাটনটি হ্যান্ডেল করার জন্য নতুন ফাংশন

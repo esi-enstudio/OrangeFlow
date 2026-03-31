@@ -6,6 +6,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SUPER_ADMIN_ID = int(os.getenv("SUPER_ADMIN_ID"))
+NGROK_AUTH_TOKEN = os.getenv("NGROK_AUTH_TOKEN")
 
 # পাসওয়ার্ড এনকোড করা (স্পেশাল ক্যারেক্টার হ্যান্ডেল করার জন্য)
 user = os.getenv("DB_USER")

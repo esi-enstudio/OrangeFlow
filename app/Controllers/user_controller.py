@@ -322,3 +322,17 @@ async def save_user_roles_final(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await render_user_details(callback.message, data['editing_uid'])
     await callback.answer("✅ রোল আপডেট হয়েছে", show_alert=True)
+
+
+
+@router.message(F.text == "🔙 প্রধান মেনু")
+async def back_to_main(message: Message, state: FSMContext, permissions: list):
+    """প্রধান মেনুতে ফিরে যাওয়া (পারমিশন অনুযায়ী বাটনসহ)"""
+    await state.clear()
+    
+    from app.Views.keyboards.reply import get_admin_main_menu
+    
+    await message.answer(
+        "আপনি প্রধান মেনুতে ফিরে এসেছেন।", 
+        reply_markup=get_admin_main_menu(permissions)
+    )

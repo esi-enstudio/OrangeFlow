@@ -65,7 +65,8 @@ def get_house_edit_fields_kb(house_id):
         ("📛 নাম", "name"), ("🔑 কোড", "code"),
         ("🌍 ক্লাস্টার", "cluster"), ("📍 রিজিয়ন", "region"),
         ("📧 ইমেইল", "email"), ("🏠 ঠিকানা", "address"),
-        ("📞 কন্টাক্ট", "contact")
+        ("📞 কন্টাক্ট", "contact"),("👤 DMS User", "dms_user"),
+        ("🔑 DMS Pass", "dms_pass"), ("🆔 DMS ID", "dms_house_id")
     ]
     for label, field in fields:
         builder.button(text=label, callback_data=f"h_edit_{field}_{house_id}")

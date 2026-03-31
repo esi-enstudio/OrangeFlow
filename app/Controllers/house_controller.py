@@ -15,7 +15,7 @@ router = Router()
 
 # --- FSM States ---
 class HouseCreateForm(StatesGroup):
-    name, code, cluster, region, email, address, contact = State(), State(), State(), State(), State(), State(), State()
+    name, code, cluster, region, email, address, contact, dms_user, dms_pass, dms_house_id = State(), State(), State(), State(), State(), State(), State(), State(), State(), State()
 
 class HouseSearchState(StatesGroup): code = State()
 class HouseUpdateState(StatesGroup): house_id, field, value = State(), State(), State()
@@ -69,16 +69,67 @@ async def process_address(message: Message, state: FSMContext):
     await state.set_state(HouseCreateForm.contact)
 
 @router.message(HouseCreateForm.contact)
+async def process_house_contact(message: Message, state: FSMContext):
+    await state.update_data(contact=message.text)
+    await message.answer("ডিএমএস ইউজারনেম (DMS Username) লিখুন:")
+    await state.set_state(HouseCreateForm.dms_user)
+
+@router.message(HouseCreateForm.dms_user)
+async def process_dms_user(message: Message, state: FSMContext):
+    await state.update_data(dms_user=message.text)
+    await message.answer("ডিএমএস পাসওয়ার্ড (DMS Password) লিখুন:")
+    await state.set_state(HouseCreateForm.dms_pass)
+
+@router.message(HouseCreateForm.dms_pass)
+async def process_dms_pass(message: Message, state: FSMContext):
+    await state.update_data(dms_pass=message.text)
+    await message.answer("ডিএমএস হাউজ আইডি (DMS House ID) লিখুন:")
+    await state.set_state(HouseCreateForm.dms_house_id)
+
+# ফাইনাল সেভ
+@router.message(HouseCreateForm.dms_house_id)
 async def save_house_final(message: Message, state: FSMContext):
     data = await state.get_data()
-    sub_date = datetime.now() + timedelta(days=30)
+    dms_house_id = message.text
+    sub_end_date = datetime.now() + timedelta(days=30)
+
     async with async_session() as session:
-        new_h = House(name=data['name'], code=data['code'], cluster=data['cluster'], region=data['region'],
-                      email=data['email'], address=data['address'], contact=message.text, subscription_date=sub_date)
-        session.add(new_h)
+        new_house = House(
+            name=data['name'],
+            code=data['code'],
+            cluster=data['cluster'],
+            region=data['region'],
+            email=data['email'],
+            address=data['address'],
+            contact=data['contact'],
+            dms_user=data['dms_user'],
+            dms_pass=data['dms_pass'],
+            dms_house_id=dms_house_id,
+            subscription_date=sub_end_date
+        )
+        session.add(new_house)
         await session.commit()
+    
     await state.clear()
-    await message.answer(f"✅ সফলভাবে তৈরি হয়েছে: {data['name']}", reply_markup=get_house_mgmt_menu())
+    await message.answer(f"✅ হাউজটি সফলভাবে তৈরি হয়েছে: {data['name']}", reply_markup=get_house_mgmt_menu())
+
+
+
+
+
+
+
+# @router.message(HouseCreateForm.contact)
+# async def save_house_final(message: Message, state: FSMContext):
+#     data = await state.get_data()
+#     sub_date = datetime.now() + timedelta(days=30)
+#     async with async_session() as session:
+#         new_h = House(name=data['name'], code=data['code'], cluster=data['cluster'], region=data['region'],
+#                       email=data['email'], address=data['address'], contact=message.text, subscription_date=sub_date)
+#         session.add(new_h)
+#         await session.commit()
+#     await state.clear()
+#     await message.answer(f"✅ হাউজটি সফলভাবে তৈরি হয়েছে: {data['name']}", reply_markup=get_house_mgmt_menu())
 
 
 # --- ৩. হাউজ লিস্ট (Pagination) ---
