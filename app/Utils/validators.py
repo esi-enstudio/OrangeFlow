@@ -11,8 +11,8 @@ def validate_and_expand_serials(text_input: str, max_limit: int = 50):
     error_message = None
 
     for line in raw_lines:
-        # ১. সাধারণ ১৮-২০ ডিজিট সিরিয়াল চেক
-        if re.fullmatch(r'\d{18,20}', line):
+        # ১. সাধারণ ১৮ ডিজিট সিরিয়াল চেক
+        if re.fullmatch(r'\d{18}', line):
             final_serials.append(line)
         
         # ২. রেঞ্জ চেক (উদা: 898803991849230687-690)

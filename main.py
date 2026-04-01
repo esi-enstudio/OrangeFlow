@@ -15,7 +15,8 @@ from app.Controllers import (
     user_controller,
     role_controller,
     automation_controller, 
-    sim_status_controller
+    sim_status_controller,
+    sim_return_controller
 )
 
 # --- ১. লগিং কনফিগারেশন (সাইলেন্ট মুড) ---
@@ -50,6 +51,7 @@ async def main():
     dp.include_router(role_controller.router)
     dp.include_router(automation_controller.router)
     dp.include_router(sim_status_controller.router)
+    dp.include_router(sim_return_controller.router)
 
     # পুরানো পেন্ডিং মেসেজগুলো স্কিপ করা
     await bot.delete_webhook(drop_pending_updates=True)
@@ -62,7 +64,7 @@ async def main():
         asyncio.create_task(session_keeper_task())
 
         print("🤖 বট এবং ওটিপি সার্ভার সচল হয়েছে...")
-        print("💓 সেশন কিপার ব্যাকগ্রাউন্ডে চালু হয়েছে (৪ মিনিট অন্তর চেক করবে)।")
+        print("💓 সেশন কিপার ব্যাকগ্রাউন্ডে চালু হয়েছে (৫ মিনিট অন্তর চেক করবে)।")
         
         await dp.start_polling(bot)
     except Exception as e:

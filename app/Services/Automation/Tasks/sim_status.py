@@ -112,18 +112,6 @@ async def run_sim_status_check(serials: list, credentials: dict):
                             }
                             results.append(temp_data)
 
-                        # if sim in scanned_sims: continue
-                        
-                        # scanned_sims.add(sim)
-                        # temp_data = {
-                        #     "SIM No": sim,
-                        #     "Distributor": cols[1].text.strip(),
-                        #     "Retailer": cols[2].text.strip(),
-                        #     "Activation Date": cols[8].text.strip(),
-                        #     "Activation Status": "Active" if cols[8].text.strip() else ""
-                        # }
-                        # results.append(format_sim_data(temp_data, house_name))
-
                 # --- পেজিনেশন চেক করা ---
                 next_btn = await page.query_selector("#dataTable_Smart_Search_Report_next")
                 if next_btn and "disabled" not in (await next_btn.get_attribute("class") or ""):
@@ -198,22 +186,3 @@ def generate_sim_summary(all_data, target_house):
         final_output.append("\n" + "\n".join(errors))
 
     return "\n".join(final_output) if final_output else "⚠️ কোনো তথ্য পাওয়া যায়নি।"
-
-
-# def format_sim_data(data: dict, target_house: str):
-#     """মেসেজ ফরম্যাটিং লজিক"""
-#     sim = data.get("SIM No", "").strip()
-#     house = data.get("Distributor", "N/A")
-#     ret = data.get("Retailer", "").strip()
-#     act_date = data.get("Activation Date", "").strip()
-#     status = data.get("Activation Status", "").strip()
-
-#     if target_house and target_house not in house:
-#         return f"❌ `{sim}`: এটি {house} হাউসের সিম। আপনার হাউস {target_house}-এ এটি প্রসেস করা সম্ভব নয়।"
-    
-#     if status == "Active" or act_date:
-#         return f"❌ `{sim}`: একটিভ।\n👤 রিটেইলার: {ret}\n🏠 হাউস: {house}\n📅 তারিখ: {act_date}"
-#     elif ret and ret != "" and "Select" not in ret:
-#         return f"⚠️ `{sim}`: ইস্যু করা আছে।\n👤 রিটেইলার: {ret}\n🏠 হাউস: {house}"
-#     else:
-#         return f"✅ `{sim}`: ইস্যু করার জন্য প্রস্তুত।\n🏠 হাউস: {house}"
