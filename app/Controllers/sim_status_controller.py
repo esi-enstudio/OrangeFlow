@@ -18,7 +18,7 @@ class SIMStatusForm(StatesGroup):
     serials = State()
 
 # --- ইনলাইন বাটন থেকে টাস্ক শুরু ---
-@router.callback_query(F.data == "run_sim_status", flags={"permission": "task_sim_status"})
+@router.callback_query(F.data == "run_sim_status", flags={"permission": "sim_status_check"})
 async def trigger_sim_status(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "🔍 **সিম স্ট্যাটাস চেক**\n\nসিম সিরিয়ালগুলো (প্রতি লাইনে একটি) লিখে পাঠান:",
@@ -28,7 +28,7 @@ async def trigger_sim_status(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # --- সিরিয়াল ইনপুট প্রসেসিং এবং অটোমেশন কল ---
-@router.message(SIMStatusForm.serials, flags={"permission": "task_sim_status"})
+@router.message(SIMStatusForm.serials, flags={"permission": "sim_status_check"})
 async def process_sim_serials(message: Message, state: FSMContext):
     # ১. ভ্যালিডেশন এবং এক্সপান্ড কল করা (এটি সিরিয়াল লিস্টও রিটার্ন করে)
     serials, invalid_lines, error_msg = validate_and_expand_serials(message.text)
