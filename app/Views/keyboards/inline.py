@@ -26,8 +26,9 @@ def get_user_action_kb(user_id):
     builder.button(text="📝 নাম আপডেট", callback_data=f"edit_uname_{user_id}")
     builder.button(text="📞 ফোন আপডেট", callback_data=f"edit_uphone_{user_id}")
     builder.button(text="🎭 রোল পরিবর্তন", callback_data=f"edit_user_roles_{user_id}")
+    builder.button(text="🏠 হাউজ পরিবর্তন", callback_data=f"edit_user_houses_{user_id}")
     builder.button(text="❌ ডিলিট করুন", callback_data=f"conf_del_u_{user_id}")
-    builder.button(text="🔙 তালিকায় ফিরে যান", callback_data="back_to_ulist")
+    builder.button(text="🔙 লিস্টে ফিরুন", callback_data="back_to_ulist")
     builder.adjust(2)
     return builder.as_markup()
 

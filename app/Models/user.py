@@ -11,12 +11,19 @@ user_roles = Table(
     Column('role_id', Integer, ForeignKey('roles.id'))
 )
 
+# পিভট টেবিল (User <-> House)
+user_houses = Table(
+    'users_houses',
+    Base.metadata,
+    Column('user_id', Integer, ForeignKey('users.id', ondelete="CASCADE")),
+    Column('house_id', Integer, ForeignKey('houses.id', ondelete="CASCADE"))
+)
+
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    house_id = Column(Integer, ForeignKey('houses.id'), nullable=True)
     telegram_id = Column(BigInteger, unique=True, nullable=False)
     name = Column(String, nullable=True)
     phone_number = Column(String, nullable=True)
@@ -25,7 +32,7 @@ class User(Base):
     roles = relationship("Role", secondary=user_roles, back_populates="users", lazy="selectin")
 
     # হাউজের সাথে রিলেশনশিপ
-    house = relationship("House", back_populates="users", lazy="selectin")
+    houses = relationship("House", secondary=user_houses, back_populates="users", lazy="selectin")
 
     # টাইমস্ট্যাম্প কলাম (যেখানে ভুলটি হচ্ছিল)
     created_at = Column(DateTime, server_default=func.now())
