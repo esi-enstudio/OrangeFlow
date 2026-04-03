@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.Models.base import Base
+from app.Models.user import user_houses
 
 class House(Base):
     __tablename__ = "houses"
@@ -26,4 +27,8 @@ class House(Base):
     updated_at = Column(DateTime, onupdate=func.now())
 
     # User মডেলের সাথে রিলেশন
-    users = relationship("User", back_populates="house")
+    users = relationship(
+        "User", 
+        secondary=user_houses, # এটি যোগ করা বাধ্যতামূলক ✅
+        back_populates="houses"
+    )

@@ -10,24 +10,27 @@ class OTPManager:
         self.latest_otp = str(code)
         self.received_at = time.time()
         self.is_used = False
-
-    async def wait_for_fresh_otp(self, timeout=120):
+    
+    async def wait_for_fresh_otp(self, house_name: str, timeout=120):
         """ওটিপি আসার জন্য ১২০ সেকেন্ড অপেক্ষা করবে"""
         start_wait = time.time()
-        print(f"⏳ [OTP] ওটিপি-র জন্য অপেক্ষা করছি (Timeout: {timeout}s)...")
+        # এখন আর শুরুতে ওটিপি রিসেট করবো না, যাতে আগে আসা ওটিপি পাওয়া যায়
+        
+        print(f"⏳ [OTP] {house_name} এর জন্য ওটিপি-র অপেক্ষা... (Timeout: {timeout}s)")
         
         import asyncio
         while time.time() - start_wait < timeout:
+            # চেক: ওটিপি যদি অব্যবহৃত হয় এবং সেটি যদি ১৫ সেকেন্ড আগে বা তার পরে এসে থাকে
             if not self.is_used and self.latest_otp:
-                # ওটিপি ২ মিনিটের বেশি পুরনো কি না চেক
-                if time.time() - self.received_at < 120:
+                # স্লাইট বাফার (১৫ সেকেন্ড) যোগ করা হলো যাতে আগে রিসিভ হওয়া ওটিপি মিস না হয়
+                if time.time() - self.received_at < 135: 
                     otp = self.latest_otp
-                    self.is_used = True # এক ওটিপি একবারই ব্যবহার হবে
-                    print(f"✅ [OTP] ওটিপি পাওয়া গেছে: {otp}")
+                    self.is_used = True 
+                    print(f"✅ [OTP] {house_name} এর জন্য ওটিপি গ্রহণ করা হয়েছে: {otp}")
                     return otp
-            
             await asyncio.sleep(2)
         
+        print(f"❌ [OTP] {house_name} এর জন্য ওটিপি পাওয়া যায়নি!")
         return None
 
 otp_manager = OTPManager()
