@@ -21,7 +21,8 @@ async def get_dms_credentials(house_id: int):
             "user": house.dms_user,
             "pass": house.dms_pass,
             "house_id": house.dms_house_id,
-            "house_name": house.name
+            "house_name": house.name,
+            "code": house.code
         }, None
 
 async def get_user_houses(telegram_id: int):

@@ -1,36 +1,63 @@
 import time
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 class OTPManager:
     def __init__(self):
-        self.latest_otp = None
-        self.received_at = 0
-        self.is_used = True
+        # ওটিপিগুলোর একটি তালিকা রাখা হবে
+        # প্রতিটি আইটেম: {"code": "123456", "received_at": timestamp, "is_used": False}
+        self.otp_pool = []
 
-    def update_otp(self, code: str):
-        self.latest_otp = str(code)
-        self.received_at = time.time()
-        self.is_used = False
-    
-    async def wait_for_fresh_otp(self, house_name: str, timeout=120):
-        """ওটিপি আসার জন্য ১২০ সেকেন্ড অপেক্ষা করবে"""
+    def update_otp(self, code: str, house_identifier: str):
+        """ম্যাক্রোড্রয়েড থেকে ওটিপি আসলে এই পুলে যোগ হবে"""
+        new_otp = {
+            "code": str(code),
+            "identifier": str(house_identifier).strip().upper(), # বড় হাতের করে সেভ
+            "received_at": time.time(),
+            "is_used": False
+        }
+        self.otp_pool.append(new_otp)
+        logger.info(f"🆕 [OTP Pool] New OTP added: {code}. Total in pool: {len(self.otp_pool)}")
+        
+        # পুরনো ওটিপি (৫ মিনিটের বেশি) পরিষ্কার করা যাতে মেমোরি নষ্ট না হয়
+        self._cleanup_old_otps()
+
+    async def wait_for_fresh_otp(self, target_id: str, timeout=110):
+        """
+        ওটিপি-র জন্য অপেক্ষা করবে। 
+        হাউজ আইডি/কোড দিয়ে ওটিপি খুঁজে বের করবে
+        """
         start_wait = time.time()
-        # এখন আর শুরুতে ওটিপি রিসেট করবো না, যাতে আগে আসা ওটিপি পাওয়া যায়
+        target_id = str(target_id).strip().upper()
         
-        print(f"⏳ [OTP] {house_name} এর জন্য ওটিপি-র অপেক্ষা... (Timeout: {timeout}s)")
+        logger.info(f"⏳ [OTP] {target_id} এর ওটিপি খুঁজছি...")
         
-        import asyncio
         while time.time() - start_wait < timeout:
-            # চেক: ওটিপি যদি অব্যবহৃত হয় এবং সেটি যদি ১৫ সেকেন্ড আগে বা তার পরে এসে থাকে
-            if not self.is_used and self.latest_otp:
-                # স্লাইট বাফার (১৫ সেকেন্ড) যোগ করা হলো যাতে আগে রিসিভ হওয়া ওটিপি মিস না হয়
-                if time.time() - self.received_at < 135: 
-                    otp = self.latest_otp
-                    self.is_used = True 
-                    print(f"✅ [OTP] {house_name} এর জন্য ওটিপি গ্রহণ করা হয়েছে: {otp}")
-                    return otp
-            await asyncio.sleep(2)
+            # পুলের সব ওটিপি চেক করা
+            for otp_data in self.otp_pool:
+                # লজিক: হাউজের নাম মিলতে হবে এবং ২ মিনিটের বেশি পুরনো হওয়া যাবে না
+                if not otp_data["is_used"] and \
+                    otp_data["identifier"] == target_id  and \
+                   (time.time() - otp_data["received_at"] < 120):
+
+                    otp_code = otp_data["code"]
+                    otp_data["is_used"] = True # এটি ব্যবহৃত হিসেবে মার্ক করা হলো
+                    
+                    logger.info(f"✅ [OTP] {target_id} এর জন্য কোড পাওয়া গেছে: {otp_code}")
+
+                    return otp_code
+            
+            await asyncio.sleep(1) # ২ সেকেন্ড পর পর চেক করবে
         
-        print(f"❌ [OTP] {house_name} এর জন্য ওটিপি পাওয়া যায়নি!")
+        logger.error("❌ [OTP] ওটিপি পাওয়ার সময় শেষ (Timeout)।")
         return None
 
+    def _cleanup_old_otps(self):
+        """৫ মিনিটের বেশি পুরনো ওটিপিগুলো লিস্ট থেকে মুছে ফেলবে"""
+        current_time = time.time()
+        self.otp_pool = [otp for otp in self.otp_pool if current_time - otp["received_at"] < 300]
+
+# গ্লোবাল অবজেক্ট
 otp_manager = OTPManager()
