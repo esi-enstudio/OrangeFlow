@@ -41,7 +41,8 @@ from app.Controllers import (
     role_controller,
     automation_controller, 
     sim_status_controller,
-    sim_return_controller
+    sim_return_controller,
+    sim_issue_controller,
 )
 
 async def main():
@@ -65,7 +66,7 @@ async def main():
         admin_controller.router, house_controller.router,
         user_controller.router, role_controller.router,
         automation_controller.router, sim_status_controller.router,
-        sim_return_controller.router
+        sim_return_controller.router, sim_issue_controller.router
     )
 
     # পুরানো পেন্ডিং মেসেজগুলো স্কিপ করা

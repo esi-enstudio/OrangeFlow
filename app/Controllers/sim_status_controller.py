@@ -13,7 +13,7 @@ from app.Models.house import House
 from app.Services.db_service import async_session
 from app.Services.Automation.Tasks.sim_status import run_sim_status_check
 from app.Utils.validators import validate_and_expand_serials
-from app.Utils.helpers import get_dms_credentials
+from app.Utils.helpers import get_dms_credentials, bn_num 
 
 router = Router()
 
@@ -83,7 +83,7 @@ async def process_sim_serials(message: Message, state: FSMContext):
 
     # ২. ইউজারকে প্রসেসিং মেসেজ দেওয়া
     processing_msg = await message.answer(
-        f"⏳ **প্রসেসিং শুরু হয়েছে...**\n🔍 মোট {len(serials)}টি সিম চেক করা হচ্ছে।",
+        f"⏳ **প্রসেসিং শুরু হয়েছে...**\n🔍 মোট {bn_num(len(serials))}টি সিম চেক করা হচ্ছে।",
         parse_mode="Markdown"
     )
 

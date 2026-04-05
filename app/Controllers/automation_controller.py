@@ -13,10 +13,10 @@ async def show_dms_tasks_menu(message: Message, permissions: list):
         builder.button(text="🔍 সিম স্ট্যাটাস চেক", callback_data="run_sim_status")
         
     if "sim_issue" in permissions:
-        builder.button(text="📤 সিম ইস্যু করা", callback_data="run_sim_issue")
+        builder.button(text="📤 সিম ইস্যু", callback_data="run_sim_issue")
         
     if "sim_return" in permissions:
-        builder.button(text="📥 সিম রিটার্ন করা", callback_data="run_sim_return")
+        builder.button(text="📥 সিম রিটার্ন", callback_data="run_sim_return")
     
     builder.adjust(1)
     

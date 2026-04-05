@@ -40,3 +40,12 @@ async def get_user_houses(telegram_id: int):
             return [], "❌ আপনার সাথে কোনো হাউজ যুক্ত নেই।"
 
         return user.houses, None
+    
+def bn_num(number):
+    """ইংরেজি সংখ্যাকে বাংলায় রূপান্তর করার কমন মেথড"""
+    en_digits = "0123456789"
+    bn_digits = "০১২৩৪৫৬৭৮৯"
+    
+    # কনভার্সন টেবিল তৈরি
+    table = str.maketrans(en_digits, bn_digits)
+    return str(number).translate(table)
