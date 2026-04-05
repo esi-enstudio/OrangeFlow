@@ -49,7 +49,7 @@ async def trigger_sim_status(callback: CallbackQuery, state: FSMContext):
             builder = InlineKeyboardBuilder()
             for h in user.houses:
                 builder.button(text=f"🏢 {h.name}", callback_data=f"task_h_sel_{h.id}")
-            builder.adjust(2)
+            builder.adjust(1)
             await callback.message.answer("আপনি কোন হাউজের ডাটা চেক করতে চান?", reply_markup=builder.as_markup())
     
     await callback.answer()

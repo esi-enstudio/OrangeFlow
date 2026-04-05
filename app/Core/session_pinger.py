@@ -71,7 +71,7 @@ async def refresh_house_session(playwright, house):
 async def session_keeper_task():
     """সব হাউজের জন্য ব্যাকগ্রাউন্ড সেশন রিফ্রেশার লুপ"""
     # বট স্টার্ট হওয়ার পর কিছুক্ষণ বিরতি (সিস্টেম স্ট্যাবল হওয়ার জন্য)
-    await asyncio.sleep(10)
+    await asyncio.sleep(5)
     logger.info("💓 Session Keeper task has started.")
     
     async with async_playwright() as p:

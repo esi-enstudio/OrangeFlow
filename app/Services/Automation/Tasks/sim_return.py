@@ -3,6 +3,7 @@ import re
 import os
 from datetime import datetime
 from playwright.async_api import async_playwright
+from app.Services.Automation.dms_scraper import get_smart_search_results
 from bs4 import BeautifulSoup
 from app.Core.login_manager import dms_login
 
@@ -12,8 +13,6 @@ RECEIVE_URL = "https://blkdms.banglalink.net/ReceiveSimsFromRetailersSubmit"
 
 async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
     """প্লে-রাইট সিম রিটার্ন মডিউল (সিম স্ট্যাটাস মডিউলের আদলে তৈরি)"""
-    scanned_data = []
-    scanned_sims = set()
     house_name = credentials.get('house_name', 'N/A')
     session_file = f"sessions/session_{credentials['user']}.json"
 
@@ -33,7 +32,7 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
             # ১. লগইন ভ্যালিডেশন
             if not await dms_login.is_session_valid(page):
                 if not await dms_login.perform_login(page, credentials, session_file):
-                    return "❌ লগইন ব্যর্থ হয়েছে। ওটিপি চেক করুন।"
+                    return "❌ DMS লগইন ব্যর্থ হয়েছে। ওটিপি চেক করুন।"
 
             # ২. স্মার্ট সার্চ - সিরিয়ালগুলোর বর্তমান অবস্থা যাচাই
             await page.goto(SMART_SEARCH_URL)
@@ -42,68 +41,25 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
             await page.select_option("#SearchType", "1") # SIM Serial
             await page.fill("#SearchValue", "\n".join(serials))
             await page.click("button.btn-success")
-            
-            await page.wait_for_selector(".card-body, #dataTable_Smart_Search_Report", timeout=20000)
-            
-            # ডেটা স্ক্র্যাপিং লুপ (স্ট্যাটাস মডিউলের মতো)
-            while True:
-                soup = BeautifulSoup(await page.content(), 'html.parser')
-                
-                # --- কার্ড ভিউ ---
-                single_card = soup.find("h3", string=lambda x: x and "Sim Information" in x)
-                if single_card:
-                    data = {}
-                    table = single_card.find_parent("div", class_="card-body").find("table")
-                    if table:
-                        for tr in table.find_all("tr"):
-                            ths, tds = tr.find_all("th"), tr.find_all("td")
-                            for i in range(len(ths)):
-                                key = ths[i].get_text(strip=True).replace(":", "")
-                                data[key] = tds[i].get_text(strip=True)
-                        
-                        sim = data.get("SIM No", "").strip()
-                        if sim and sim not in scanned_sims:
-                            scanned_sims.add(sim)
-                            scanned_data.append(data)
-                    break
 
-                # --- টেবিল ভিউ ---
-                multi_table = soup.find("table", id="dataTable_Smart_Search_Report")
-                if multi_table:
-                    rows = multi_table.find("tbody").find_all("tr")
-                    for row in rows:
-                        cols = row.find_all("td")
-                        if len(cols) < 9 or "No data" in cols[0].text: continue
-                        sim = cols[0].text.strip().replace("o", "").replace("'", "")
-                        if sim not in scanned_sims:
-                            scanned_sims.add(sim)
-                            scanned_data.append({
-                                "SIM No": sim,
-                                "Distributor": cols[1].text.strip(),
-                                "Retailer": cols[2].text.strip(),
-                                "Activation Date": cols[8].text.strip()
-                            })
-
-                # পেজিনেশন
-                next_btn = await page.query_selector("#dataTable_Smart_Search_Report_next")
-                if next_btn and "disabled" not in (await next_btn.get_attribute("class") or ""):
-                    await next_btn.click()
-                    await asyncio.sleep(2)
-                else:
-                    break
+            scanned_data, error = await get_smart_search_results(page)
 
             # ৩. স্ক্র্যাপ করা ডেটা এনালাইসিস এবং সামারি পাঠানো
-            if not scanned_data:
-                return "⚠️ কোনো সিরিয়ালের তথ্য পাওয়া যায়নি।"
+            # if not scanned_data:
+            #     return "⚠️ কোনো সিরিয়ালের তথ্য পাওয়া যায়নি।"
 
+            if error:
+                return error # "Data not found" বা অন্য এরর থাকলে এখানেই শেষ
+            
+            # ৪. স্ক্র্যাপ করা ডাটা এনালাইসিস করে সামারি তৈরি
             summary_msg, grouped_return_data = process_return_summary(scanned_data, house_name)
             await bot.send_message(chat_id, summary_msg, parse_mode="Markdown")
 
             if not grouped_return_data:
                 return "🏁 রিটার্নযোগ্য কোনো সিরিয়াল নেই। প্রসেস শেষ।"
-
+            
             # ৪. সিম রিটার্ন সাবমিশন প্রসেস (Action Phase)
-            await page.goto(RECEIVE_URL)
+            await page.goto(RECEIVE_URL)            
             
             for retailer_code, sims in grouped_return_data.items():
                 # তারিখ সেট (আজকের তারিখ)
@@ -148,32 +104,70 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
             await browser.close()
 
 def process_return_summary(scanned_data, target_house):
-    """রিটার্নযোগ্য সিমগুলোকে রিটেইলার কোড অনুযায়ী গ্রুপ করে এবং সামারি মেসেজ তৈরি করে"""
-    grouped_data = {} # Retailer Code -> List of SIMs
-    output_lines = ["📝 **রিটার্ন প্রসেস এনালাইসিস:**\n"]
+    """সিম রিটার্ন এনালাইসিস সামারি জেনারেটর (স্ট্যাটাস মডিউলের স্টাইলে)"""
+    active_map = {}   # Date -> List of strings
+    issued_map = {}   # Retailer -> List of strings
+    warehouse_list = []
+    errors = []
     
+    # এটি মূলত অটোমেশন সাবমিশনের জন্য ব্যবহৃত হবে
+    grouped_return_data = {} # Retailer Code -> List of Serials
+
     for d in scanned_data:
-        sim = d.get("SIM No", "")
-        house = d.get("Distributor", "")
+        sim = d.get("SIM No", "").strip()
+        house = d.get("Distributor", "N/A")
         retailer = d.get("Retailer", "")
         act_date = d.get("Activation Date", "")
+        msisdn = d.get("MSISDN", d.get("Mobile No", "N/A"))
 
-        # হাউজ ভ্যালিডেশন
+        # ১. হাউজ ভ্যালিডেশন
         if target_house and target_house not in house:
-            output_lines.append(f"❌ `{sim}`: এটি {house} হাউসের সিম।")
+            errors.append(f"❌ `{sim}`: এটি {house} হাউসের সিম।")
             continue
 
+        # ২. এক্টিভ সিম চেক (রিটার্ন সম্ভব নয়)
         if act_date:
-            output_lines.append(f"❌ `{sim}`: একটিভ। (রিটার্ন সম্ভব নয়)")
-        elif retailer and "Select" not in retailer and retailer.strip():
-            # রিটেইলার কোড এক্সট্রাক্ট করা (R12345)
+            if act_date not in active_map: active_map[act_date] = []
+            clean_msisdn = f"0{msisdn}" if len(msisdn) == 10 else msisdn
+            active_map[act_date].append(f"🔴 {sim}\n📱 {clean_msisdn} (এক্টিভ)")
+
+        # ৩. ইস্যু করা সিম চেক (এগুলোই রিটার্ন করা হবে)
+        elif retailer and retailer.strip() and "Select" not in retailer:
+            if retailer not in issued_map: issued_map[retailer] = []
+            issued_map[retailer].append(f"🟡 {sim}")
+            
+            # সাবমিশনের জন্য রিটেইলার কোড (R12345) এক্সট্রাক্ট করা
             match = re.search(r'R\d+', retailer)
             code = match.group(0) if match else retailer
-            
-            if code not in grouped_data: grouped_data[code] = []
-            grouped_data[code].append(sim)
-            output_lines.append(f"⚠️ `{sim}`: ইস্যু করা আছে। (রিটার্ন করা হবে)")
-        else:
-            output_lines.append(f"✅ `{sim}`: ওয়্যারহাউসে আছে। (রিটার্ন প্রয়োজন নেই)")
+            if code not in grouped_return_data: grouped_return_data[code] = []
+            grouped_return_data[code].append(sim)
 
-    return "\n".join(output_lines), grouped_data
+        # ৪. ওয়্যারহাউসে আছে এমন সিম (রিটার্ন প্রয়োজন নেই)
+        else:
+            warehouse_list.append(f"⚪ {sim} (ওয়্যারহাউসে আছে)")
+
+    # --- মেসেজ ফরম্যাটিং ---
+    final_output = ["📝 **সিম রিটার্ন এনালাইসিস রিপোর্ট:**\n"]
+
+    # এক্টিভ সিম সেকশন (তারিখ অনুযায়ী)
+    if active_map:
+        for date, lines in active_map.items():
+            final_output.append("\n".join(lines))
+            final_output.append(f"📅 {date}\n")
+
+    # ইস্যু করা সিম সেকশন (রিটেইলার অনুযায়ী) - এই অংশটিই রিটার্ন হবে
+    if issued_map:
+        if len(final_output) > 1: final_output.append("----------------------------")
+        for ret, sims in issued_map.items():
+            final_output.append("\n".join(sims))
+            final_output.append(f"••••••••••••••••••••••\n🏪 {ret} (রিটার্ন করা হবে)\n")
+
+    # রেডি সিম/ওয়্যারহাউস সেকশন
+    if warehouse_list:
+        final_output.append("\n".join(warehouse_list))
+
+    # এরর সেকশন (অন্য হাউসের সিম)
+    if errors:
+        final_output.append("\n" + "\n".join(errors))
+
+    return "\n".join(final_output), grouped_return_data
