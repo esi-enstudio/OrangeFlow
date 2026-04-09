@@ -4,8 +4,8 @@ import os
 from datetime import datetime
 from playwright.async_api import async_playwright
 from app.Services.Automation.dms_scraper import get_smart_search_results
-from bs4 import BeautifulSoup
 from app.Core.login_manager import dms_login
+from app.Utils.helpers import bn_num
 
 # ইউআরএল সমূহ
 SMART_SEARCH_URL = "https://blkdms.banglalink.net/SmartSearchReport"
@@ -18,7 +18,7 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
 
     async with async_playwright() as p:
         # ব্রাউজার লঞ্চ
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=True)
         
         # সেশন লোড করা
         if os.path.exists(session_file):
@@ -43,10 +43,6 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
             await page.click("button.btn-success")
 
             scanned_data, error = await get_smart_search_results(page)
-
-            # ৩. স্ক্র্যাপ করা ডেটা এনালাইসিস এবং সামারি পাঠানো
-            # if not scanned_data:
-            #     return "⚠️ কোনো সিরিয়ালের তথ্য পাওয়া যায়নি।"
 
             if error:
                 return error # "Data not found" বা অন্য এরর থাকলে এখানেই শেষ
@@ -92,11 +88,11 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
                 try:
                     await page.wait_for_selector("button.swal2-confirm", timeout=10000)
                     await page.click("button.swal2-confirm")
-                    await bot.send_message(chat_id, f"✅ `{retailer_code}` এর {len(sims)}টি সিম সফলভাবে রিটার্ন সম্পন্ন।")
+                    await bot.send_message(chat_id, f"✅ `{retailer_code}` এর {bn_num(len(sims))}টি সিম সফলভাবে রিটার্ন সম্পন্ন।")
                 except:
                     await bot.send_message(chat_id, f"⚠️ `{retailer_code}` এর সাবমিশন কনফার্ম করা যায়নি।")
 
-            return "🏁 **সকল রিটার্ন প্রসেস সফলভাবে সম্পন্ন হয়েছে।**"
+            # return "🏁 **সকল রিটার্ন প্রসেস সফলভাবে সম্পন্ন হয়েছে।**"
 
         except Exception as e:
             return f"❌ অটোমেশন এরর: {str(e)}"

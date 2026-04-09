@@ -1,10 +1,11 @@
 import re
+import os
 import asyncio
 from datetime import datetime
 from playwright.async_api import async_playwright
 from app.Core.login_manager import dms_login
 from app.Services.Automation.dms_scraper import get_smart_search_results
-import os
+from app.Utils.helpers import bn_num
 
 ISSUE_URL = "https://blkdms.banglalink.net/IssueSimToRetailer/IssueSim"
 
@@ -85,75 +86,74 @@ async def run_finalize_issue(serials: list, retailer_code: str, credentials: dic
             await page.wait_for_selector("#okBtn", timeout=10000)
             await page.click("#okBtn")
             
-            return f"✅ সফলভাবে `{retailer_code}` কোডে {len(serials)}টি সিম ইস্যু সম্পন্ন হয়েছে।"
+            return f"✅ সফলভাবে `{retailer_code}` কোডে {bn_num(len(serials))}টি সিম ইস্যু সম্পন্ন হয়েছে।"
 
         except Exception as e:
             return f"❌ অটোমেশন এরর: {str(e)}"
         finally:
             await browser.close()
 
-def process_issue_summary(scanned_data, target_house):
-    """সিম ইস্যু এনালাইসিস সামারি জেনারেটর (রিটার্ন ও স্ট্যাটাস মডিউলের স্টাইলে)"""
-    active_map = {}         # Date -> List of strings (🔴 Active SIMs)
-    already_issued_map = {} # Retailer -> List of strings (🟡 Already Issued)
-    ready_for_issue = []    # List of display strings (✅ Ready)
+def process_issue_summary(all_data, target_house):
+    """সিম ইস্যু এনালাইসিস সামারি (স্ট্যাটাস মডিউলের স্টাইলে)"""
+    active_map = {}   # Date -> List of strings
+    issued_map = {}   # Retailer -> List of strings
+    ready_list = []   # ইস্যুর জন্য প্রস্তুত সিমের বর্ণনা
+    ready_serials_only = [] # শুধুমাত্র সিরিয়াল লিস্ট (অটোমেশনের জন্য)
     errors = []
 
-    
-    # এটি কন্ট্রোলারে পাঠানোর জন্য
-    ready_serials_list = []
-
-    for d in scanned_data:
+    for d in all_data:
         sim = d.get("SIM No", "").strip()
         house = d.get("Distributor", "N/A")
         retailer = d.get("Retailer", "")
         act_date = d.get("Activation Date", "")
         msisdn = d.get("MSISDN", d.get("Mobile No", "N/A"))
 
-        # ১. হাউজ ভ্যালিডেশন
+        # ১. হাউজ চেক
         if target_house and target_house not in house:
             errors.append(f"❌ `{sim}`: এটি {house} হাউসের সিম।")
             continue
 
-        # ২. এক্টিভ সিম চেক (ইস্যু সম্ভব নয়)
+        # ২. এক্টিভ সিম (🟢)
         if act_date:
             if act_date not in active_map: active_map[act_date] = []
             clean_msisdn = f"0{msisdn}" if len(msisdn) == 10 else msisdn
-            active_map[act_date].append(f"🔴 {sim}\n📱 {clean_msisdn} (এক্টিভ)")
+            active_map[act_date].append(f"🟢 {sim}\n📱 {clean_msisdn}")
 
-        # ৩. ইতিমধ্যে ইস্যু করা সিম হ্যান্ডলিং (🟡)
+        # ৩. ইতিমধ্যে ইস্যু করা সিম (🟡)
         elif retailer and retailer.strip() and "Select" not in retailer:
-            if retailer not in already_issued_map: already_issued_map[retailer] = []
-            already_issued_map[retailer].append(f"🟡 {sim}\n🏪 {retailer}")
+            if retailer not in issued_map: issued_map[retailer] = []
+            issued_map[retailer].append(f"🟡 {sim}")
 
-        # ৪. ইস্যুর জন্য প্রস্তুত সিম (এগুলোই ফাইনাল প্রসেসে যাবে)
+        # ৪. ইস্যু হয় নাই বা রেডি সিম (⚪)
         else:
-            ready_for_issue.append(f"✅ {sim}")
-            ready_serials_list.append(sim)
+            ready_list.append(f"⚪ {sim}")
+            ready_serials_only.append(sim)
 
-    # --- মেসেজ ফরম্যাটিং ---
+    # --- মেসেজ ফরম্যাটিং শুরু ---
     final_output = ["📝 **সিম ইস্যু এনালাইসিস রিপোর্ট:**\n"]
 
-    # এক্টিভ সিম সেকশন
-    if active_map:
-        for date, lines in active_map.items():
-            final_output.append("\n".join(lines))
-            final_output.append(f"📅 {date}\n")
+    # এক্টিভ সিম সেকশন (তারিখ অনুযায়ী)
+    for date, lines in active_map.items():
+        final_output.append("\n".join(lines))
+        final_output.append(f"📅 {date}\n")
 
-    # ইতিমধ্যে ইস্যু করা সিম সেকশন
-    if already_issued_map:
+    # ইস্যু করা সিম সেকশন (রিটেইলার অনুযায়ী)
+    if issued_map:
         if len(final_output) > 1: final_output.append("----------------------------")
-        for ret, sims in already_issued_map.items():
+        for ret, sims in issued_map.items():
             final_output.append("\n".join(sims))
             final_output.append(f"••••••••••••••••••••••\n🏪 {ret} (ইতিমধ্যে ইস্যু করা)\n")
 
-    # রেডি সিম সেকশন (যাদের ইস্যু করা হবে)
-    if ready_for_issue:
-        if len(final_output) > 1: final_output.append("----------------------------")
-        final_output.append("\n".join(ready_for_issue))
+    # রেডি সিম সেকশন
+    if ready_list:
+        final_output.append("\n".join(ready_list))
+        final_output.append("✅ এই সিমগুলো ইস্যু করা সম্ভব।\n")
 
-    # এরর সেকশন (অন্য হাউসের সিম)
+    # এরর সেকশন
     if errors:
         final_output.append("\n" + "\n".join(errors))
 
-    return "\n".join(final_output), ready_serials_list
+    report_text = "\n".join(final_output) if final_output else "⚠️ কোনো তথ্য পাওয়া যায়নি।"
+    
+    # আমরা রিপোর্ট টেক্সট এবং শুধুমাত্র ইস্যুযোগ্য সিরিয়ালের লিস্ট—উভয়ই রিটার্ন করছি
+    return report_text, ready_serials_only

@@ -1,0 +1,14 @@
+ভার্চুয়াল এনভায়রনমেন্ট অ্যাক্টিভেট করা
+টার্মিনাল অনুযায়ী নিচের কমান্ডটি দিন:
+
+যদি Command Prompt (CMD) ব্যবহার করেন:
+.venv\Scripts\activate
+
+যদি PowerShell ব্যবহার করেন:
+.\.venv\Scripts\Activate.ps1
+
+(যদি PowerShell-এ এরর দেয়, তবে প্রথমে এটি লিখে এন্টার দিন: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process এবং তারপর ওপরের কমান্ডটি দিন)
+
+অ্যাক্টিভেট হয়েছে কিনা বুঝবেন কিভাবে?
+সফলভাবে অ্যাক্টিভেট হলে টার্মিনালে আপনার পাথ-এর বাম পাশে ব্র্যাকেটে (.venv) লেখাটি দেখতে পাবেন। যেমন:
+(.venv) PS C:\Users\EMIL\OneDrive\Desktop\OrangeFlow>
