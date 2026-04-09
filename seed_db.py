@@ -15,7 +15,7 @@ async def seed_data():
             "view_houses", "create_house", "renew_subscription", "view_users", 
             "create_user", "edit_user", "delete_user", "manage_settings", 
             "ga_live", "itopup_replace", "dms_access", "sim_status_check", 
-            "sim_issue", "sim_return"
+            "sim_issue", "sim_return", "report_access","view_ga_live"
         ]
         
         db_perms = {}

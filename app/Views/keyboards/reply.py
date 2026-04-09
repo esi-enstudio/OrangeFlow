@@ -16,6 +16,9 @@ def get_admin_main_menu(permissions: list):
     # ২য় রো: DMS Tasks
     if "dms_access" in permissions:
         buttons.append([KeyboardButton(text="🤖 DMS Tasks")])
+
+    if "report_access" in permissions:
+        buttons.append([KeyboardButton(text="📊 রিপোর্টস")])
     
     # ৩য় রো: সেটিংস
     if "manage_settings" in permissions:
