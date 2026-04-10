@@ -68,3 +68,8 @@ dist/
 *.swp
 *.swo__pycache__/
 *.pyc
+
+browser_profiles/
+sessions/
+temp_downloads/
+*.xlsx

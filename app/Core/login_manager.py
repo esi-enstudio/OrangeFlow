@@ -2,7 +2,7 @@ import asyncio
 import os
 import time
 import logging
-from playwright.async_api import async_playwright
+from playwright.async_api import Page
 from app.Core.otp_manager import otp_manager
 
 # লগিং কনফিগারেশন
@@ -11,65 +11,49 @@ logger = logging.getLogger(__name__)
 class DMSLoginManager:
     def __init__(self):
         self.login_url = "https://blkdms.banglalink.net/Account/Login"
-        # প্রতিটি হাউজের জন্য আলাদা লক রাখার ডিকশনারি
         self._locks = {}
 
     def get_lock(self, house_id):
-        """নির্দিষ্ট হাউজের জন্য একটি লক রিটার্ন করবে"""
+        """নির্দিষ্ট হাউজের জন্য একটি লক রিটার্ন করবে যাতে একই হাউজে ডাবল ওটিপি না যায়"""
         if house_id not in self._locks:
             self._locks[house_id] = asyncio.Lock()
         return self._locks[house_id]
 
-    async def get_browser_context(self, playwright, session_path: str):
-        """সেশন ফাইলসহ ব্রাউজার এবং কন্টেক্সট জেনারেট করার ফাংশন"""
-        # ব্রাউজার লঞ্চ (Headless=True প্রডাকশনের জন্য)
-        browser = await playwright.chromium.launch(headless=True)
-        
-        # সেশন ফাইল থাকলে সেটি লোড করবে, না থাকলে ফ্রেশ কন্টেক্সট
-        if os.path.exists(session_path):
-            context = await browser.new_context(storage_state=session_path)
-        else:
-            context = await browser.new_context()
-        
-        return browser, context
-    
-    async def is_session_valid(self, page):
+    async def is_session_valid(self, page: Page):
         """সেশন সচল আছে কি না তা চেক করা"""
         try:
-            logger.info("🔍 [Session] Verifying current session validity...")
-            
-            # সরাসরি স্মার্ট সার্চ রিপোর্টে যাওয়ার চেষ্টা (লগইন থাকলে এটি ওপেন হয়)
-            await page.goto("https://blkdms.banglalink.net/SmartSearchReport", timeout=15000)
-            await asyncio.sleep(2) # রিডাইরেক্ট বাফার
+            logger.info("🔍 [Session] সেশন ভ্যালিডিটি চেক করা হচ্ছে...")
+            await page.goto(
+                "https://blkdms.banglalink.net/SmartSearchReport", 
+                timeout=40000, 
+                wait_until="commit" 
+            )
+            await asyncio.sleep(3) 
 
-
-            # যদি URL-এ 'login' না থাকে এবং সার্চ টাইপ এলিমেন্ট পাওয়া যায়
-            if "login" not in page.url.lower() and await page.query_selector("#SearchType"):
-                logger.info("✅ [Session] Session is valid. No login needed.")
-                return True
-            
-            logger.warning("⚠️ [Session] Session is invalid or expired.")
+            current_url = page.url.lower()
+            if "login" not in current_url:
+                if await page.query_selector("#SearchType"):
+                    logger.info("✅ [Session] সেশন সচল আছে।")
+                    return True
             return False
         except Exception as e:
-            logger.error(f"❌ [Session Error] ভ্যালিডিটি চেক এরর: {str(e)}")
+            logger.error(f"❌ [Session Error] চেক করার সময় এরর: {str(e)}")
             return False
 
-    async def perform_login(self, page, credentials: dict, session_path: str):
-        """হাউজ ভিত্তিক ডাইনামিক লগইন লজিক"""
+    async def perform_login(self, page: Page, credentials: dict):
+        """হাউজ ভিত্তিক ডাইনামিক লগইন লজিক (সংশোধিত ওটিপি লজিক)"""
         house_id = str(credentials['house_id'])
+        h_code = credentials.get('code')
         
-        # শুধুমাত্র এই নির্দিষ্ট হাউজের জন্য লক ব্যবহার করা হচ্ছে
         async with self.get_lock(house_id):
             try:
-                logger.info(f"🚀 [Login] লগইন শুরু: {credentials['house_name']} (ID: {house_id})")
+                logger.info(f"🚀 [Login] লগইন শুরু: {credentials['house_name']} ({h_code})")
                 await page.goto(self.login_url)
                 await asyncio.sleep(2) 
                 
-                # ১. ক্রেডেনশিয়াল ইনপুট
                 await page.fill("#Email", str(credentials['user']))
                 await page.fill("#Password", str(credentials['pass']))
                 
-                # ২. ড্রপডাউনে ডাটা আসার জন্য অপেক্ষা
                 target_option = f"select#Distributor option[value='{house_id}']"
                 try:
                     await page.wait_for_selector(target_option, state="attached", timeout=20000)
@@ -77,9 +61,8 @@ class DMSLoginManager:
                     logger.error(f"❌ [Error] নির্ধারিত সময়ে ড্রপডাউনে হাউজ {house_id} আসেনি।")
                     return False
 
-                await asyncio.sleep(2) 
+                await asyncio.sleep(1) 
 
-                # ৩. হাউজ সিলেকশন (JS লজিক)
                 await page.evaluate(f"""
                     (function() {{
                         let select = document.getElementById('Distributor');
@@ -93,59 +76,59 @@ class DMSLoginManager:
                     }})();
                 """)
                 
-                await asyncio.sleep(2) 
-                await page.click("#btnSubmit")
-                await asyncio.sleep(2)
+                await asyncio.sleep(1) 
                 
-                if await page.query_selector("#OTP"):
-                    # হাউজ কোড (MYMVAI01) ব্যবহার করে ওটিপি খুঁজি
-                    h_code = credentials.get('code') 
-                    
-                    if not h_code:
-                        logger.error("❌ [Login] এরর: ক্রেডেনশিয়াল ডিকশনারিতে হাউজ 'code' পাওয়া যায়নি!")
-                        return False
+                # লগইন ক্লিকে যাওয়ার আগের সময় (OTP ফিল্টারের জন্য)
+                login_click_time = time.time()
+                await page.click("#btnSubmit")
+                
+                # ৫. স্মার্ট ওটিপি ডিটেকশন ✅
+                otp_box_found = False
+                try:
+                    # ১০ সেকেন্ড অপেক্ষা করা ওটিপি বক্সের জন্য
+                    await page.wait_for_selector("#OTP", state="visible", timeout=12000)
+                    otp_box_found = True
+                    logger.info(f"⏳ [Login] ওটিপি পেজ ডিটেক্ট হয়েছে। ওটিপি খুঁজছি...")
+                except:
+                    logger.info("ℹ️ [Login] ওটিপি বক্স পাওয়া যায়নি, সরাসরি ড্যাশবোর্ড চেক করছি...")
 
-                    # ওটিপি ম্যানেজারের মাধ্যমে ফ্রেশ ওটিপি-র জন্য ওয়েট করা
-                    otp = await otp_manager.wait_for_fresh_otp(target_id=h_code)
+                if otp_box_found:
+                    # ওটিপি ম্যানেজারের মাধ্যমে ফ্রেশ ওটিপি নেওয়া
+                    otp = await otp_manager.wait_for_fresh_otp(
+                        target_id=h_code, 
+                        request_time=login_click_time
+                    )
 
                     if otp:
                         await page.fill("#OTP", str(otp))
                         await page.click("#submitButton")
-                        logger.info(f"🔵 [Login] ওটিপি {otp} ইনপুট দিয়ে সাবমিট করা হয়েছে।")
+                        logger.info(f"🔵 [Login] ওটিপি {otp} দিয়ে সাবমিট করা হয়েছে।")
                         
-                        # রিডাইরেক্ট সম্পন্ন হওয়া পর্যন্ত অপেক্ষা (লগইন ইউআরএল না থাকা পর্যন্ত)
+                        # রিডাইরেক্ট হওয়া পর্যন্ত অপেক্ষা
                         try:
                             await page.wait_for_function(
                                 "() => !window.location.href.toLowerCase().includes('login')",
-                                timeout=20000
+                                timeout=25000
                             )
                         except:
-                            logger.warning("⚠️ [Login] রিডাইরেক্ট হতে সময় নিচ্ছে...")
+                            logger.warning("⚠️ [Login] রিডাইরেক্ট স্লো হচ্ছে...")
                     else:
-                        logger.error(f"❌ [Login] ওটিপি সংগ্রহ ব্যর্থ হয়েছে (Timeout) হাউজ: {h_code}")
+                        logger.error(f"❌ [Login] ওটিপি সংগ্রহ টাইমআউট! হাউজ: {h_code}")
                         return False
 
-                # ৫. ফাইনাল সেশন ভ্যালিডেশন এবং সেভ
-                await asyncio.sleep(2) # ছোট বাফার যাতে পেজ লোড ফিনিশ হয়
+                # ৬. ফাইনাল ভ্যালিডেশন
+                await asyncio.sleep(4) # সেশন সেভ হওয়ার জন্য পর্যাপ্ত সময়
                 
                 if "login" not in page.url.lower():
-                    # সেশন ডিরেক্টরি নিশ্চিত করা
-                    session_dir = os.path.dirname(session_path)
-                    if session_dir and not os.path.exists(session_dir):
-                        os.makedirs(session_dir, exist_ok=True)
-
-                    # সেশন স্টেট সেভ করা
-                    await page.context.storage_state(path=session_path)
-                    logger.info(f"✅ [Login] সফলভাবে লগইন সম্পন্ন: {credentials['house_name']}")
+                    logger.info(f"✅ [Login] সফল: {credentials['house_name']}")
                     return True
                 else:
-                    logger.error(f"❌ [Login] ব্যর্থ: এখনো লগইন পেজে রয়ে গেছে। (URL: {page.url})")
+                    logger.error(f"❌ [Login] ব্যর্থ: এখনো লগইন পেজে রয়ে গেছে।")
                     return False
 
             except Exception as e:
                 logger.error(f"❌ [Critical Login Error] {str(e)}")
                 return False
-
 
 # গ্লোবাল অবজেক্ট
 dms_login = DMSLoginManager()
