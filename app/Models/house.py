@@ -32,3 +32,5 @@ class House(Base):
         secondary=user_houses, # এটি যোগ করা বাধ্যতামূলক ✅
         back_populates="houses"
     )
+    
+    retailers = relationship("Retailer", back_populates="house")
