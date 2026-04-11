@@ -40,7 +40,7 @@ class DMSLoginManager:
             logger.error(f"❌ [Session Error] চেক করার সময় এরর: {str(e)}")
             return False
 
-    async def perform_login(self, page: Page, credentials: dict):
+    async def perform_login(self, page: Page, credentials: dict, session_path: str):
         """হাউজ ভিত্তিক ডাইনামিক লগইন লজিক (সংশোধিত ওটিপি লজিক)"""
         house_id = str(credentials['house_id'])
         h_code = credentials.get('code')
@@ -120,11 +120,11 @@ class DMSLoginManager:
                 await asyncio.sleep(4) # সেশন সেভ হওয়ার জন্য পর্যাপ্ত সময়
                 
                 if "login" not in page.url.lower():
-                    logger.info(f"✅ [Login] সফল: {credentials['house_name']}")
+                    # সেশন পাথ প্যারামিটার হিসেবে রিসিভ করতে হবে
+                    await page.context.storage_state(path=session_path)
+                    logger.info(f"✅ [Login] সফল এবং সেশন ফাইলে সেভ হয়েছে।")
                     return True
-                else:
-                    logger.error(f"❌ [Login] ব্যর্থ: এখনো লগইন পেজে রয়ে গেছে।")
-                    return False
+
 
             except Exception as e:
                 logger.error(f"❌ [Critical Login Error] {str(e)}")

@@ -55,11 +55,11 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
 
         # ৫. সিম রিটার্ন সাবমিশন প্রসেস (Action Phase)
         total_retailers = len(grouped_return_data)
-        logger.info(f"🛠 মোট {total_retailers}টি রিটেইলারের সাবমিশন শুরু হচ্ছে...")
+        logger.info(f"🛠 মোট {bn_num(total_retailers)}টি রিটেইলারের সাবমিশন শুরু হচ্ছে...")
         
         count = 1
         for retailer_code, sims in grouped_return_data.items():
-            logger.info(f"🔄 [{count}/{total_retailers}] রিটেইলার `{retailer_code}` এর কাজ চলছে...")
+            logger.info(f"🔄 [{bn_num(count)}/{bn_num(total_retailers)}] রিটেইলার `{retailer_code}` এর কাজ চলছে...")
             
             # ১. রিটার্ন পেজে যাওয়া
             await page.goto(RECEIVE_URL, wait_until="domcontentloaded", timeout=60000)
@@ -146,11 +146,12 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
         return f"❌ অটোমেশন এরর: {str(e).replace('_', ' ')}"
     
     finally:
-        # ১০. কাজ শেষে শুধু ট্যাব (Page) বন্ধ করা ✅
-        # এতে ব্রাউজার সচল থাকবে এবং পরবর্তী কাজে লগইন লাগবে না।
         if page:
             await page.close()
-            logger.info(f"🚪 [{house_name}] ট্যাব বন্ধ করা হয়েছে।")
+        if context:
+            await context.close() # ✅ এটি এখন অবশ্যই করতে হবে
+        logger.info(f"🚪 [{house_name}] টাস্ক ক্লিনআপ সম্পন্ন।")
+
 
 def process_return_summary(scanned_data, target_house):
     """রিটার্নযোগ্য সিম গ্রুপিং এবং রিপোর্ট জেনারেশন"""

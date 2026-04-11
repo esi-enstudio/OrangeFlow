@@ -1,9 +1,13 @@
 import asyncio
 import re
+import logging
 from datetime import datetime
 from app.Core.session_manager import session_manager
 from app.Services.Automation.dms_scraper import get_smart_search_results
 from app.Utils.helpers import bn_num
+
+# লগিং সেটআপ
+logger = logging.getLogger("app.Services.Automation.Tasks")
 
 # ইউআরএল সমূহ
 SMART_SEARCH_URL = "https://blkdms.banglalink.net/SmartSearchReport"
@@ -11,43 +15,59 @@ ISSUE_URL = "https://blkdms.banglalink.net/IssueSimToRetailer/IssueSim"
 
 async def run_sim_issue_status(serials: list, credentials: dict):
     """ধাপ ১: সিমগুলোর বর্তমান অবস্থা চেক করা (সেশন ম্যানেজার ব্যবহার করে)"""
-    # ১. সেশন ম্যানেজার থেকে সরাসরি সচল পেজ সংগ্রহ করা (এটি অটো-লগইন হ্যান্ডেল করবে)
+    house_name = credentials.get('house_name', 'N/A')
+    
+    logger.info(f"🚀 [{house_name}] সিম ইস্যু এনালাইসিস শুরু হচ্ছে...")
+    # ১. সচল পেজ সংগ্রহ
     page, context = await session_manager.get_valid_page(credentials)
     
     try:
-        # ২. স্মার্ট সার্চ পেজে যাওয়া
-        await page.goto(SMART_SEARCH_URL, wait_until="commit", timeout=40000)
+        # ২. স্মার্ট সার্চ পেজে যাওয়া (domcontentloaded দ্রুত এবং স্ট্যাবল)
+        logger.info(f"🔍 [{house_name}] স্মার্ট সার্চ পেজে যাওয়া হচ্ছে...")
+        await page.goto(SMART_SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_selector("#SearchType", timeout=30000)
         
-        # ৩. সার্চ ফরম পূরণ ও সাবমিট
-        await page.select_option("#SearchType", "1") # SIM Serial
+        # ৩. সার্চ ফরম পূরণ
+        await page.select_option("#SearchType", "1") 
         await page.fill("#SearchValue", "\n".join(serials))
         await page.click("button.btn-success")
+        logger.info(f"📡 সার্চ সাবমিট হয়েছে, ডাটা সংগ্রহের অপেক্ষা...")
 
-        # ৪. সেন্ট্রাল স্ক্র্যাপার কল করা (এটি Card, Table, Error সব হ্যান্ডেল করবে)
+        # ৪. স্ক্র্যাপার কল করে রেজাল্ট সংগ্রহ
         scanned_data, error = await get_smart_search_results(page)
         return scanned_data, error
         
     except Exception as e:
+        logger.error(f"❌ এনালাইসিস এরর: {str(e)}")
         return None, f"❌ স্ট্যাটাস চেক এরর: {str(e)}"
     finally:
-        # কাজ শেষে ট্যাব এবং কন্টেক্সট বন্ধ করা
-        await page.close()
-        await context.close()
+        # ৫. পরিবর্তন: শুধু ট্যাব বন্ধ করা হবে, context নয়! ✅
+        if page:
+            await page.close()
+            logger.info(f"🚪 [{house_name}] এনালাইসিস ট্যাব বন্ধ করা হয়েছে।")
 
 async def run_finalize_issue(serials: list, retailer_code: str, credentials: dict):
     """ধাপ ২: চূড়ান্তভাবে ডিএমএস-এ সিম ইস্যু সম্পন্ন করা"""
+    house_name = credentials.get('house_name', 'N/A')
+    
+    logger.info(f"📤 [{house_name}] রিটেইলার `{retailer_code}` এর জন্য ফাইনাল ইস্যু শুরু...")
+    # ১. নতুন পেজ সংগ্রহ
     page, context = await session_manager.get_valid_page(credentials)
     
     try:
-        await page.goto(ISSUE_URL, wait_until="networkidle", timeout=40000)
+        # ২. ইস্যু পেজে যাওয়া (networkidle পরিহার করা হয়েছে)
+        logger.info(f"🌐 ইস্যু পেজে যাওয়া হচ্ছে...")
+        await page.goto(ISSUE_URL, wait_until="domcontentloaded", timeout=60000)
+        
+        # ৩. তারিখ সেট করা
         await page.wait_for_selector("#IssueDate", timeout=30000)
-
-        # ১. তারিখ সেট করা (আজকের তারিখ)
         today = datetime.now().strftime('%Y-%m-%d')
         await page.evaluate(f"document.getElementById('IssueDate').value = '{today}';")
+        logger.info(f"📅 তারিখ সেট: {today}")
 
-        # ২. রিটেইলার সিলেকশন (JS Chosen Dropdown লজিক)
+        # ৪. রিটেইলার ড্রপডাউন হ্যান্ডলিং (Attached স্টেট ব্যবহার করা হয়েছে কারণ এটি লুকানো থাকে)
+        await page.wait_for_selector("#Retailer", state="attached", timeout=30000)
+        
         js_select = """
             (code) => {
                 let select = document.getElementById('Retailer');
@@ -55,7 +75,6 @@ async def run_finalize_issue(serials: list, retailer_code: str, credentials: dic
                 for (let i = 0; i < select.options.length; i++) {
                     if (select.options[i].text.includes(code)) {
                         select.selectedIndex = i;
-                        // jQuery ট্রিগার বা স্ট্যান্ডার্ড ইভেন্ট ট্রিগার
                         if (typeof window.jQuery !== 'undefined') {
                             window.jQuery(select).trigger('chosen:updated').change();
                         } else {
@@ -68,40 +87,52 @@ async def run_finalize_issue(serials: list, retailer_code: str, credentials: dic
             }
         """
         if not await page.evaluate(js_select, retailer_code):
+            logger.error(f"❌ রিটেইলার `{retailer_code}` পাওয়া যায়নি।")
             return f"❌ এরর: রিটেইলার কোড `{retailer_code}` ড্রপডাউনে পাওয়া যায়নি।"
 
-        await asyncio.sleep(1.5) # ড্রপডাউন প্রসেসিং এর জন্য বিরতি
+        await asyncio.sleep(1.5) 
 
-        # ৩. সিম লিস্ট ইনপুট ও অ্যাড বাটনে ক্লিক
-        await page.fill("#SimList", "\n".join(serials))
+        # ৫. সিম লিস্ট ইনপুট ও অ্যাড বাটনে ক্লিক (force=True ব্যবহার করা হয়েছে নিরাপদ ইনপুটের জন্য)
+        await page.fill("#SimList", "\n".join(serials), force=True)
         await page.click("#AddBtn")
+        logger.info(f"➕ সিম লিস্ট অ্যাড করা হয়েছে।")
 
-        # ৪. ওয়ার্নিং মোডাল (যদি থাকে) হ্যান্ডলিং
+        # ৬. ডিএমএস ওয়ার্নিং মোডাল হ্যান্ডলিং
         try:
-            # ১০ সেকেন্ড ওয়েট করবে মোডাল আসার জন্য
-            await page.wait_for_selector("button.swal2-confirm", state="visible", timeout=10000)
-            await page.click("button.swal2-confirm")
-            await asyncio.sleep(1.5)
-        except:
-            pass
+            confirm_btn = "button.swal2-confirm"
+            await page.wait_for_selector(confirm_btn, state="visible", timeout=8000)
+            await page.click(confirm_btn)
+            await asyncio.sleep(1)
+        except: pass
 
-        # ৫. ফাইনাল ইস্যু বাটন ক্লিক
-        await page.wait_for_selector("#SimIssueBtn", state="visible", timeout=10000)
+        # ৭. ফাইনাল ইস্যু বাটন ক্লিক
+        logger.info(f"💾 ফাইনাল সাবমিট করা হচ্ছে...")
+        await page.wait_for_selector("#SimIssueBtn", state="visible", timeout=15000)
         await page.click("#SimIssueBtn")
 
-        # ৬. সাকসেস মোডাল (okBtn) হ্যান্ডলিং
+        # ৮. সাকসেস কনফার্মেশন (okBtn)
         try:
             await page.wait_for_selector("#okBtn", state="visible", timeout=20000)
             await page.click("#okBtn")
-            # বাংলা সংখ্যা হেল্পার ব্যবহার করে মেসেজ
+            logger.info(f"✅ ইস্যু সফল!")
             return f"✅ সফলভাবে `{retailer_code}` কোডে {bn_num(len(serials))}টি সিম ইস্যু সম্পন্ন হয়েছে।"
-        except:
-            return f"⚠️ প্রসেস শেষ হয়েছে, কিন্তু সাকসেস কনফার্মেশন পাওয়া যায়নি। ডিএমএস ড্যাশবোর্ড চেক করুন।"
+        except Exception as e:
+            logger.warning(f"⚠️ সাকসেস বাটন পাওয়া যায়নি: {str(e)}")
+            return f"⚠️ প্রসেস শেষ হয়েছে, কিন্তু সাকসেস কনফার্মেশন পাওয়া যায়নি। ডিএমএস চেক করুন।"
 
     except Exception as e:
+        logger.error(f"💥 ইস্যু সাবমিশন ক্র্যাশ: {str(e)}", exc_info=True)
         return f"❌ ইস্যু সাবমিশন এরর: {str(e)}"
+    
     finally:
-        await page.close()
+        if page:
+            await page.close()
+        if context:
+            await context.close() # ✅ এটি এখন অবশ্যই করতে হবে
+        logger.info(f"🚪 [{house_name}] টাস্ক ক্লিনআপ সম্পন্ন।")
+
+
+
 
 def process_issue_summary(all_data, target_house):
     """সিম ইস্যু এনালাইসিস সামারি জেনারেটর (আইকন আপডেট সহ)"""

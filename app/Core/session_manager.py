@@ -1,17 +1,18 @@
 import os
 import asyncio
 import logging
-from sqlalchemy import select
 from app.Core.automation_engine import engine
 from app.Core.login_manager import dms_login
-from app.Services.db_service import async_session
-from app.Models.house import House
 
 logger = logging.getLogger(__name__)
+SESSION_DIR = "sessions"
 
 class SessionManager:
     def __init__(self):
+        # প্রতিটি হাউজের জন্য আলাদা লক যাতে ওটিপি কনফ্লিক্ট না হয়
         self._locks = {}
+        if not os.path.exists(SESSION_DIR):
+            os.makedirs(SESSION_DIR)
 
     def _get_house_lock(self, house_code):
         if house_code not in self._locks:
@@ -19,79 +20,44 @@ class SessionManager:
         return self._locks[house_code]
 
     async def get_valid_page(self, credentials: dict):
-        """টাস্ক ফাইলগুলোর জন্য সচল পেজ নিশ্চিত করবে।"""
+        """
+        জেসন সেশন ফাইল ব্যবহার করে একটি সচল পেজ ও কন্টেক্সট দিবে।
+        এটি প্যারালাল প্রসেসিং সাপোর্ট করে।
+        """
         h_code = credentials['code']
-        
-        async with self._get_house_lock(h_code):
-            page, context = await engine.get_house_page(h_code)
+        session_path = os.path.join(SESSION_DIR, f"session_{h_code}.json")
+        lock = self._get_house_lock(h_code)
+
+        # ১. সেশন চেক এবং লগইন প্রসেসটি লকের ভেতর থাকবে
+        async with lock:
+            browser = await engine.get_browser()
             
-            # সেশন চেক
+            # ২. সেশন ফাইল থাকলে সেটি দিয়ে কন্টেক্সট খোলা
+            if os.path.exists(session_path):
+                context = await browser.new_context(storage_state=session_path)
+                logger.info(f"📂 [Manager] {h_code} সেশন ফাইল লোড করা হয়েছে।")
+            else:
+                context = await browser.new_context()
+                logger.info(f"🆕 [Manager] {h_code} এর কোনো ফাইল নেই, নতুন সেশন লাগবে।")
+
+            page = await context.new_page()
+
+            # ৩. সেশন কি কাজ করছে?
             if await dms_login.is_session_valid(page):
+                logger.info(f"✅ [Manager] {h_code} সেশন বর্তমানে সচল।")
                 return page, context
             else:
-                logger.warning(f"⚠️ [Manager] {h_code} সেশন মৃত। মেরামত হচ্ছে...")
-                success = await dms_login.perform_login(page, credentials)
+                # ৪. সেশন মৃত হলে লগইন করা (এটি নতুন জেসন সেভ করবে)
+                logger.warning(f"⚠️ [Manager] {h_code} সেশন এক্সপায়ার হয়েছে। লগইন শুরু হচ্ছে...")
+                
+                # লগইন ম্যানেজার এখন সেশন পাথে ডাটা সেভ করবে
+                success = await dms_login.perform_login(page, credentials, session_path)
+                
                 if success:
                     return page, context
-                
-                await page.close()
-                # প্রোফাইল কন্টেক্সট বন্ধ করবো না, যাতে পরবর্তীতে অটো-রিকভার করতে পারে
-                raise Exception(f"DMS Login failed for {h_code}")
-
-    async def background_watcher(self):
-        """সেশন পাহারাদার (হার্টবিট সিস্টেম)"""
-        await asyncio.sleep(20) 
-        logger.info("💓 [Watcher] Session Heartbeat Started.")
-        
-        while True:
-            try:
-                async with async_session() as session:
-                    houses = (await session.execute(select(House).where(House.dms_user != None))).scalars().all()
-
-                for house in houses:
-                    credentials = {
-                        "user": house.dms_user, "pass": house.dms_pass,
-                        "house_id": house.dms_house_id, "house_name": house.name, "code": house.code
-                    }
-                    
-                    async with self._get_house_lock(house.code):
-                        page = None
-                        try:
-                            # ১. পেজ নেওয়া
-                            page, context = await engine.get_house_page(house.code)
-                            
-                            logger.info(f"🔄 [Watcher] Checking: {house.name}")
-
-                            # ২. সেশন ভ্যালিডেশন
-                            if await dms_login.is_session_valid(page):
-                                # ৩. ডামি সার্চ হার্টবিট
-                                try:
-                                    await page.goto("https://blkdms.banglalink.net/SmartSearchReport", wait_until="commit", timeout=30000)
-                                    await page.select_option("#SearchType", "1")
-                                    await page.fill("#SearchValue", "898800000000000000")
-                                    await page.click("button.btn-success")
-                                    await asyncio.sleep(3)
-                                    logger.info(f"✅ [Watcher] {house.name} হার্টবিট সফল।")
-                                except Exception as e:
-                                    logger.error(f"⚠️ [Watcher] {house.name} হার্টবিট ফেইল: {e}")
-                            else:
-                                # ৪. অটো-লগইন
-                                logger.info(f"🔄 [Watcher] {house.name} সেশন মৃত। লগইন শুরু...")
-                                await dms_login.perform_login(page, credentials)
-
-                        except Exception as e:
-                            logger.error(f"❌ [Watcher Error] {house.name}: {e}")
-                        finally:
-                            # শুধুমাত্র ট্যাব বন্ধ করবো, কন্টেক্সট নয়! ✅
-                            if page: await page.close()
-                    
-                    await asyncio.sleep(5)
-
-                logger.info("💤 [Watcher] Next cycle in 4 minutes...")
-                await asyncio.sleep(240) 
-
-            except Exception as e:
-                logger.error(f"❌ [Watcher Loop Error] {e}")
-                await asyncio.sleep(60)
+                else:
+                    await page.close()
+                    await context.close()
+                    raise Exception(f"DMS Login failed for {h_code} after session expiration.")
 
 session_manager = SessionManager()

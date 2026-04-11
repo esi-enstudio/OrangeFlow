@@ -57,20 +57,12 @@ async def run_sim_status_check(serials: list, credentials: dict):
         return f"❌ অটোমেশন এরর: {str(e)}"
     
     finally:
-        # ৫. কাজ শেষে শুধু পেজ (Tab) বন্ধ করা ✅
-        # এখানে 'await context.close()' লাইনটি সরিয়ে ফেলা হয়েছে।
-        try:
-            if page:
-                await page.close()
-                logger.info(f"📁 [Task] {house_name} ট্যাব বন্ধ করা হয়েছে। প্রোফাইল সচল আছে।")
-        except Exception as e:
-            logger.error(f"⚠️ [Task] ট্যাব বন্ধ করতে সমস্যা: {e}")
-            
-    # finally:
-    #     # ৫. কাজ শেষে শুধু পেজ (Tab) এবং কন্টেক্সট বন্ধ করা ✅
-    #     # এর ফলে গ্লোবাল ব্রাউজার প্রসেসটি বন্ধ হবে না এবং পরবর্তী ইউজার দ্রুত রেসপন্স পাবে।
-    #     await page.close()
-    #     await context.close()
+        if page:
+            await page.close()
+        if context:
+            await context.close() # ✅ এটি এখন অবশ্যই করতে হবে
+        logger.info(f"🚪 [{house_name}] টাস্ক ক্লিনআপ সম্পন্ন।")
+
 
     # ৬. স্ক্র্যাপ করা ডাটা থেকে সামারি রিপোর্ট জেনারেট করে রিটার্ন করা
     return generate_sim_summary(scanned_data, house_name)

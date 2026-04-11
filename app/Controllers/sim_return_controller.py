@@ -105,8 +105,7 @@ async def execute_sim_return_automation(message: Message, state: FSMContext, cre
     
     wait_msg = await message.answer(
         f"⏳ **রিটার্ন প্রসেস শুরু হয়েছে...**\n"
-        f"🏢 হাউজ: {credentials['house_name']}\n"
-        f"🤖 ওটিপি সংগ্রহ ও লগইন সম্পন্ন হতে ১-২ মিনিট সময় লাগতে পারে।",
+        f"🏢 হাউজ: {credentials['house_name']}\n",
         parse_mode="Markdown"
     )
 
