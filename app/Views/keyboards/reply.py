@@ -26,7 +26,7 @@ def get_admin_main_menu(permissions: list):
     row3 = []
     if "manage_field_force" in permissions: 
         row3.append(KeyboardButton(text="👥 ফিল্ড ফোর্স"))
-    if "manage_retailers" in permissions: 
+    if "manage_retailer" in permissions: 
         row3.append(KeyboardButton(text="🏪 রিটেইলারস"))
     if row3: 
         buttons.append(row3)

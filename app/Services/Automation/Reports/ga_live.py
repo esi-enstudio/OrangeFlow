@@ -126,10 +126,10 @@ async def process_and_save_data(file_path, house_id):
         async with async_session() as session:
             # ৩. ফাস্ট পারফরম্যান্সের জন্য ওই হাউজের সকল রিটেইলারের কোড এবং আইডি ম্যাপ তৈরি করা ✅
             ret_res = await session.execute(
-                select(Retailer.code, Retailer.id).where(Retailer.house_id == house_id)
+                select(Retailer.retailer_code, Retailer.id).where(Retailer.house_id == house_id)
             )
             # ডিকশনারি ফরম্যাট: {"R12345": 10, "R54321": 11}
-            retailer_map = {str(r.code).strip(): r.id for r in ret_res.all()}
+            retailer_map = {str(r.retailer_code).strip(): r.id for r in ret_res.all()}
 
             # ৪. বর্তমান ডাটাবেজের আজকের সব SIM_NO সংগ্রহ (ডুপ্লিকেট এড়াতে)
             db_res = await session.execute(
