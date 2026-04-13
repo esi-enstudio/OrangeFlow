@@ -8,6 +8,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 SUPER_ADMIN_ID = int(os.getenv("SUPER_ADMIN_ID"))
 NGROK_AUTH_TOKEN = os.getenv("NGROK_AUTH_TOKEN")
 
+# excel_wa_sync.py হেডলেস মুড কন্ট্রোল (স্ট্রিং থেকে বুলিয়ান এ রূপান্তর)
+HEADLESS = os.getenv("HEADLESS_MODE", "True").lower() == "true"
+
 # পাসওয়ার্ড এনকোড করা (স্পেশাল ক্যারেক্টার হ্যান্ডেল করার জন্য)
 user = os.getenv("DB_USER")
 password = quote_plus(os.getenv("DB_PASS")) # এখানে @# এনকোড হবে

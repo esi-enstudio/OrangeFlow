@@ -8,6 +8,7 @@ class LiveActivation(Base):
 
     id = Column(Integer, primary_key=True)
     house_id = Column(Integer, ForeignKey('houses.id'), nullable=False)
+    retailer_id = Column(Integer, ForeignKey('retailers.id'), nullable=True)
     
     # activation data columns
     activation_date = Column(String)
@@ -35,3 +36,4 @@ class LiveActivation(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     house = relationship("House")
+    retailer = relationship("Retailer", back_populates="activations")

@@ -8,17 +8,24 @@ class FieldForce(Base):
 
     id = Column(Integer, primary_key=True)
     house_id = Column(Integer, ForeignKey('houses.id'), nullable=False)
-    retailer_id = Column(Integer, ForeignKey('retailers.id'), nullable=True) # নিজের কোড চিহ্নিত করতে
-    agency_id = Column(Integer, nullable=True) # এজেন্সির ডাটা থাকলে
+    
+    # ইউজার টেবিলের সাথে রিলেশন (বট ইউজার আইডি) ✅
+    # এটি থাকলে আরএসও বা বিপি যখন নিজের জিএ চেক করবে, তখন বট তাকে চিনতে পারবে।
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    
+    # নিজের রিটেইলার কোড চিহ্নিত করতে
+    retailer_id = Column(Integer, ForeignKey('retailers.id'), nullable=True) 
+    
+    agency_id = Column(String, nullable=True) # এজেন্সির ডাটা থাকলে
     
     # বেসিক ইনফো
-    code = Column(String, unique=True) # DMS Code
+    code = Column(String, unique=True, index=True) # DMS Code (R642686)
     name = Column(String, nullable=False)
     phone_number = Column(String, unique=True, index=True)
     personal_number = Column(String, unique=True)
     pool_number = Column(String, unique=True)
-    type = Column(String) # SR or BP
-    status = Column(String, default="Active") # Active or Resigned
+    type = Column(String) # 'SR' or 'BP'
+    status = Column(String, default="Active") # 'Active' or 'Resigned'
     
     # ব্যাংক ইনফো
     bank_name = Column(String)
@@ -30,7 +37,7 @@ class FieldForce(Base):
     home_town = Column(String)
     emergency_contact_person_name = Column(String)
     emergency_contact_person_number = Column(String)
-    relationship = Column(String)
+    emergency_person_relationship = Column(String) # ইমারজেন্সি কন্টাক্টের সাথে সম্পর্ক
     last_education = Column(String)
     institution_name = Column(String)
     blood_group = Column(String)
@@ -56,5 +63,7 @@ class FieldForce(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
+    # রিলেশনশিপসমূহ
     house = relationship("House")
-    retailer = relationship("Retailer") # এটি রিটেইলার টেবিল তৈরির পর একটিভ হবে
+    retailer = relationship("Retailer") 
+    user = relationship("User", back_populates="field_force_profile") # ইউজারের সাথে লিঙ্ক

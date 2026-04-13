@@ -36,3 +36,6 @@ class Retailer(Base):
 
     # হাউজের সাথে রিলেশন
     house = relationship("House", back_populates="retailers")
+
+    # রিলেশন: এই রিটেইলারের অধীনে কতগুলো লাইভ এক্টিভেশন আছে
+    activations = relationship("LiveActivation", back_populates="retailer")

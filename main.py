@@ -19,6 +19,7 @@ from app.Controllers import (
     admin_controller, house_controller, user_controller,
     role_controller, automation_controller, sim_status_controller,
     sim_return_controller, sim_issue_controller, ga_live_controller,
+    field_force_controller, retailer_controller,
 )
 
 # --- ২. লগিং কনফিগারেশন (সাইলেন্ট মুড) ---
@@ -110,6 +111,7 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
     dp.message.middleware(ACLMiddleware())
+    dp.callback_query.middleware(ACLMiddleware())
 
     # ৪. রাউটারগুলো রেজিস্টার করা
     dp.include_routers(
@@ -117,7 +119,8 @@ async def main():
         user_controller.router, role_controller.router,
         automation_controller.router, sim_status_controller.router,
         sim_return_controller.router, sim_issue_controller.router,
-        ga_live_controller.router,
+        ga_live_controller.router, field_force_controller.router,
+        retailer_controller.router,
     )
 
     await bot.delete_webhook(drop_pending_updates=True)
@@ -140,10 +143,18 @@ async def main():
         pass
     finally:
         logger.info("👋 শাটডাউন শুরু হচ্ছে...")
+
+        # ১. সব ব্যাকগ্রাউন্ড টাস্ক (Webhook, Scheduler) বন্ধ করা
         for task in background_tasks:
-            task.cancel()
+            if not task.done():
+                task.cancel()
+
+        # ২. আলাদাভাবে ইঞ্জিন বন্ধ করা ✅
         await engine.stop()
+
+        # ৩. বট সেশন বন্ধ করা
         await bot.session.close()
+        
         logger.info("✅ সবকিছু সফলভাবে বন্ধ করা হয়েছে।")
 
 if __name__ == "__main__":

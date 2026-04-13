@@ -34,6 +34,9 @@ class User(Base):
     # হাউজের সাথে রিলেশনশিপ
     houses = relationship("House", secondary=user_houses, back_populates="users", lazy="selectin")
 
+    # ফিল্ড ফোর্স এর সাথে রিলেশনশিপ
+    field_force_profile = relationship("FieldForce", back_populates="user", uselist=False)
+
     # টাইমস্ট্যাম্প কলাম (যেখানে ভুলটি হচ্ছিল)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())

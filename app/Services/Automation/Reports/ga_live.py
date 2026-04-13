@@ -11,6 +11,7 @@ from app.Models.house import House
 from app.Models.live_activation import LiveActivation
 from app.Services.db_service import async_session
 from app.Core.session_manager import session_manager
+from app.Models.retailer import Retailer
 
 # openpyxl ওয়ার্নিং সাইলেন্ট করা
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
@@ -107,21 +108,30 @@ async def sync_house_data(house):
         if os.path.exists(file_path):
             os.remove(file_path)
 
+
+
 async def process_and_save_data(file_path, house_id):
-    """সবগুলো কলাম ম্যাপ করে ডাটা সেভ করার লজিক"""
+    """সবগুলো কলাম ম্যাপ করে এবং রিটেইলার আইডি লিঙ্ক করে ডাটা সেভ করার লজিক"""
     try:
-        # ফাইল রিড করা
+        # ১. ফাইল রিড করা
         df = pd.read_excel(file_path, dtype=str)
         if df.empty:
             logger.info(f"ℹ️ {file_path} ফাইলে কোনো ডাটা পাওয়া যায়নি।")
             return
 
-        # সকল NaN এবং খালি ভ্যালু পরিষ্কার করা
+        # ২. সকল NaN এবং খালি ভ্যালু পরিষ্কার করা
         df = df.fillna("")
         df = df.replace({pd.NA: "", "nan": "", "NaN": ""})
 
         async with async_session() as session:
-            # বর্তমান ডাটাবেজের আজকের সব SIM_NO সংগ্রহ (ডুপ্লিকেট এড়াতে)
+            # ৩. ফাস্ট পারফরম্যান্সের জন্য ওই হাউজের সকল রিটেইলারের কোড এবং আইডি ম্যাপ তৈরি করা ✅
+            ret_res = await session.execute(
+                select(Retailer.code, Retailer.id).where(Retailer.house_id == house_id)
+            )
+            # ডিকশনারি ফরম্যাট: {"R12345": 10, "R54321": 11}
+            retailer_map = {str(r.code).strip(): r.id for r in ret_res.all()}
+
+            # ৪. বর্তমান ডাটাবেজের আজকের সব SIM_NO সংগ্রহ (ডুপ্লিকেট এড়াতে)
             db_res = await session.execute(
                 select(LiveActivation.sim_no).where(LiveActivation.house_id == house_id)
             )
@@ -129,45 +139,67 @@ async def process_and_save_data(file_path, house_id):
 
             new_records = []
             for _, row in df.iterrows():
-                # সামনে-পেছনে স্পেস থাকলে পরিষ্কার করা
                 sim_no = str(row.get('SIM_NO', '')).strip()
+                ret_code = str(row.get('RETAILER_CODE', '')).strip()
                 
+                # ৫. ইউনিক চেক: যদি সিমটি আগে থেকে ডাটাবেজে না থাকে
                 if sim_no and sim_no not in existing_sims:
-                    # পূর্ণাঙ্গ কলাম ম্যাপিং (আপনার রিকোয়েস্ট অনুযায়ী)
-                    new_records.append(LiveActivation(
-                        house_id=house_id,
-                        activation_date=str(row.get('ACTIVATION_DATE', '')),
-                        activation_time=str(row.get('ACTIVATION_TIME', '')),
-                        retailer_code=str(row.get('RETAILER_CODE', '')),
-                        retailer_name=str(row.get('RETAILER_NAME', '')),
-                        bts_code=str(row.get('BTS_CODE', '')),
-                        thana=str(row.get('THANA', '')),
-                        promotion=str(row.get('PROMOTION', '')),
-                        product_code=str(row.get('PRODUCT_CODE', '')),
-                        product_name=str(row.get('PRODUCT_NAME', '')),
-                        sim_no=sim_no,
-                        msisdn=str(row.get('MSISDN', '')),
-                        selling_price=str(row.get('SELLING_PRICE', '')),
-                        bp_flag=str(row.get('BP_FLAG', '')),
-                        bp_number=str(row.get('BP_NUMBER', '')),
-                        fc_bts_code=str(row.get('FC_BTS_CODE', '')),
-                        bio_bts_code=str(row.get('BIO_BTS_CODE', '')),
-                        dh_lifting_date=str(row.get('DH_LIFTINGDATE', '')),
-                        issue_date=str(row.get('ISSUEDATE', '')),
-                        subscription_type=str(row.get('SUBSCRIPTION_TYPE', '')),
-                        service_class=str(row.get('SERVICE_CLASS', '')),
-                        customer_second_contact=str(row.get('CUSTOMER_SECOND_CONTACT', ''))
-                    ))
+                    
+                    # ৬. রিটেইলার আইডি খুঁজে বের করা (ম্যাপ থেকে) ✅
+                    # যদি রিটেইলার লিস্টে এই কোড না থাকে, তবে এটি None থাকবে
+                    retailer_db_id = retailer_map.get(ret_code)
 
+                    # হেল্পার ফাংশন: ডাটা ক্লিন এবং স্ট্রিং নিশ্চিত করতে
+                    def get_val(key):
+                        return str(row.get(key, '')).strip()
+
+                    new_activation = LiveActivation(
+                        house_id=house_id,
+                        retailer_id=retailer_db_id, # রিটেইলার টেবিলের ফরেন-কি ✅
+                        
+                        activation_date=get_val('ACTIVATION_DATE'),
+                        activation_time=get_val('ACTIVATION_TIME'),
+                        retailer_code=ret_code, # টেক্সট কোডটিও ব্যাকআপ হিসেবে থাকবে
+                        retailer_name=get_val('RETAILER_NAME'),
+                        bts_code=get_val('BTS_CODE'),
+                        thana=get_val('THANA'),
+                        promotion=get_val('PROMOTION'),
+                        product_code=get_val('PRODUCT_CODE'),
+                        product_name=get_val('PRODUCT_NAME'),
+                        sim_no=sim_no,
+                        msisdn=get_val('MSISDN'),
+                        selling_price=get_val('SELLING_PRICE'),
+                        bp_flag=get_val('BP_FLAG'),
+                        bp_number=get_val('BP_NUMBER'),
+                        fc_bts_code=get_val('FC_BTS_CODE'),
+                        bio_bts_code=get_val('BIO_BTS_CODE'),
+                        dh_lifting_date=get_val('DH_LIFTINGDATE'),
+                        issue_date=get_val('ISSUEDATE'),
+                        subscription_type=get_val('SUBSCRIPTION_TYPE'),
+                        service_class=get_val('SERVICE_CLASS'),
+                        customer_second_contact=get_val('CUSTOMER_SECOND_CONTACT')
+                    )
+                    new_records.append(new_activation)
+
+            # ৭. বাল্ক ইনসার্ট করা
             if new_records:
                 session.add_all(new_records)
                 await session.commit()
-                logger.info(f"📊 [Database] হাউজ আইডি {house_id}: {len(new_records)}টি ইউনিক ডাটা যুক্ত হয়েছে।")
+                logger.info(f"📊 [Sync] হাউজ আইডি {house_id}: {len(new_records)}টি নতুন ডাটা যুক্ত হয়েছে।")
             else:
-                logger.info(f"ℹ️ হাউজ আইডি {house_id}: নতুন কোনো ডাটা নেই।")
+                logger.info(f"ℹ️ হাউজ আইডি {house_id}: নতুন কোনো ডাটা পাওয়ার যায়নি।")
 
     except Exception as e:
-        logger.error(f"❌ [Process Error] ডাটা প্রসেসিং সমস্যা: {str(e)}")
+        logger.error(f"❌ [Process Error] ডাটা প্রসেসিং সমস্যা: {str(e)}", exc_info=True)
+
+
+
+
+
+
+
+
+
 
 async def reset_daily_activations():
     """রাত ১২টায় ডাটা ডিলিট করার লজিক"""
