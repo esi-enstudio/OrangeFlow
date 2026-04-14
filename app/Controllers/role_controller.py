@@ -3,6 +3,8 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.exceptions import TelegramBadRequest
+
 from sqlalchemy import select, delete
 from app.Models.role import Role, Permission
 from app.Services.db_service import async_session
@@ -109,9 +111,14 @@ async def toggle_permission(callback: CallbackQuery, state: FSMContext):
         builder.button(text="💾 সেভ করুন", callback_data="save_role_final")
         builder.adjust(2)
 
-        # মেসেজ এডিট করে নতুন কিবোর্ড পাঠানো
-        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
-        await callback.answer()  # লোডিং আইকন বন্ধ করা
+        # এরর হ্যান্ডলিং যোগ করা হয়েছে ✅
+        try:
+            await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+        except TelegramBadRequest:
+            # যদি কিবোর্ডে কোনো পরিবর্তন না থাকে (ডাবল ক্লিক), তবে এই এরর ইগনোর করবে
+            pass
+            
+        await callback.answer()
 
 
 # --- ফাইনাল সেভ লজিক ---
@@ -263,8 +270,16 @@ async def toggle_edit_permission(callback: CallbackQuery, state: FSMContext):
             builder.button(text=f"{status} {p.name}", callback_data=f"upd_toggle_p_{p.id}")
         builder.button(text="💾 আপডেট সেভ করুন", callback_data="save_updated_role_perms")
         builder.adjust(2)
-        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
+        # এরর হ্যান্ডলিং যোগ করা হয়েছে ✅
+        try:
+            await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+        except TelegramBadRequest:
+            # যদি কিবোর্ডে কোনো পরিবর্তন না থাকে (ডাবল ক্লিক), তবে এই এরর ইগনোর করবে
+            pass
+            
         await callback.answer()
+
 
 @router.callback_query(F.data == "save_updated_role_perms")
 async def finalize_role_perm_update(callback: CallbackQuery, state: FSMContext):

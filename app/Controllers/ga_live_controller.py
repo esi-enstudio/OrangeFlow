@@ -10,7 +10,6 @@ from app.Models.user import User
 from app.Models.house import House
 from app.Models.live_activation import LiveActivation
 from app.Services.db_service import async_session
-from app.Services.Automation.Reports.excel_wa_sync import run_excel_wa_sync
 
 # লগিং কনফিগারেশন
 logger = logging.getLogger(__name__)
@@ -28,10 +27,6 @@ async def show_reports_menu(message: Message):
     
     # জিএ লাইভ রিপোর্টের জন্য বাটন (পারমিশন অনুযায়ী)
     builder.button(text="📡 জিএ লাইভ", callback_data="ga_live_main")
-
-    # নতুন ম্যানুয়াল সিঙ্ক বাটন ✅
-    # এটি শুধু এডমিন বা যাদের বিশেষ পারমিশন আছে তাদের জন্য রাখা ভালো
-    builder.button(text="🔄 এক্সেল ও হোয়াটসঅ্যাপ সিঙ্ক", callback_data="force_excel_wa_sync")
     
     # ভবিষ্যতে আরও রিপোর্ট যোগ করার জন্য এখানে বাটন বাড়ানো যাবে
     # builder.button(text="📈 সেলস রিপোর্ট", callback_data="sales_report")
@@ -145,33 +140,3 @@ async def send_ga_summary(message: Message, house: House):
             await message.edit_text(report_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
         except:
             await message.answer(report_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
-
-
-
-# ==========================================
-# 
-# ==========================================
-
-@router.callback_query(F.data == "force_excel_wa_sync", flags={"permission": "send_ga_live_to_whatsapp"})
-async def handle_force_excel_sync(callback: CallbackQuery):
-    """বাটনে ক্লিক করলে ম্যানুয়ালি এক্সেল আপডেট ও হোয়াটসঅ্যাপে পাঠাবে"""
-    
-    # ইউজারকে একটি তাৎক্ষণিক ফিডব্যাক দেওয়া
-    wait_msg = await callback.message.answer(
-        "⏳ **ম্যানুয়াল সিঙ্ক শুরু হয়েছে...**\n"
-        "এটি এক্সেল আপডেট করে স্ক্রিনশট নিবে এবং হোয়াটসঅ্যাপে পাঠাবে। ১-২ মিনিট সময় লাগতে পারে। অনুগ্রহ করে অপেক্ষা করুন।",
-        parse_mode="Markdown"
-    )
-    
-    try:
-        # আমাদের তৈরি করা সিঙ্ক ফাংশনটি কল করা
-        await run_excel_wa_sync()
-        
-        # কাজ সফল হলে আগের মেসেজটি আপডেট করা
-        await wait_msg.edit_text("✅ **সফল!**\nমাস্টার এক্সেল ফাইল আপডেট হয়েছে এবং হোয়াটসঅ্যাপে রিপোর্ট পাঠানো হয়েছে।")
-        
-    except Exception as e:
-        logger.error(f"Manual Sync Error: {e}")
-        await wait_msg.edit_text(f"❌ **এরর হয়েছে!**\nবিস্তারিত: {str(e)}")
-    
-    await callback.answer() # কলব্যাক সার্কেল বন্ধ করা

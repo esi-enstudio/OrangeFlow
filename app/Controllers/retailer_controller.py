@@ -77,47 +77,76 @@ def get_retailer_full_profile_text(r: Retailer):
     )
 
 
-# --- ১. প্রবেশ পথ (হাউজ চেক) ---
+
+# --- ১. প্রবেশ পথ (সংশোধিত আইডি ডিটেকশন) ---
 @router.message(F.text == "🏪 রিটেইলারস", flags={"permission": "manage_retailer"})
-async def retailer_main(message: Message, state: FSMContext, permissions: list):
-    await state.clear()
+async def retailer_main(event: types.Union[Message, CallbackQuery], state: FSMContext, permissions: list):
+    # event থেকে ইউজারের আসল আইডি নেওয়া ✅
+    user_id = event.from_user.id
+    # রেসপন্স পাঠানোর জন্য সঠিক অবজেক্ট নির্ধারণ
+    target = event if isinstance(event, Message) else event.message
+
+    await state.set_state(None)
+    data = await state.get_data()
+    selected_house_id = data.get('selected_house_id')
+
     async with async_session() as session:
-        # ইউজারের হাউজগুলো লোড করা
-        res = await session.execute(
-            select(User).options(selectinload(User.houses)).where(User.telegram_id == message.from_user.id)
-        )
-        user = res.scalar_one_or_none()
-        
-        # ১. সুপার এডমিন চেক ✅
-        if int(message.from_user.id) == int(SUPER_ADMIN_ID):
-            # সুপার এডমিন যদি কোনো হাউজের সাথে সরাসরি যুক্ত নাও থাকে, সে সব হাউজ দেখতে পারবে
+        # ১. সেশন চেক
+        if selected_house_id:
+            house = await session.get(House, selected_house_id)
+            if house:
+                return await show_house_retailer_menu(target, house.id, house.name, permissions)
+
+        # ২. সুপার এডমিন চেক (সবার আগে) ✅
+        from config.settings import SUPER_ADMIN_ID
+        if int(user_id) == int(SUPER_ADMIN_ID):
             h_res = await session.execute(select(House))
             all_houses = h_res.scalars().all()
             
             if not all_houses:
-                return await message.answer("❌ সিস্টেমে কোনো হাউজ তৈরি করা নেই।")
+                return await target.answer("❌ সিস্টেমে কোনো হাউজ তৈরি করা নেই।")
             
             builder = InlineKeyboardBuilder()
             for h in all_houses:
                 builder.button(text=f"🏢 {h.name}", callback_data=f"ret_hsel_{h.id}")
             builder.adjust(1)
-            return await message.answer("সুপার এডমিন প্যানেল: হাউজ নির্বাচন করুন", reply_markup=builder.as_markup())
+            return await target.answer("🛠 <b>সুপার এডমিন:</b> হাউজ নির্বাচন করুন", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+        # ৩. সাধারণ ইউজার চেক
+        res = await session.execute(
+            select(User).options(selectinload(User.houses)).where(User.telegram_id == user_id)
+        )
+        user = res.scalar_one_or_none()
         
         if not user or not user.houses:
-            return await message.answer("❌ আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।")
+            return await target.answer("❌ আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই। এডমিনের সাথে যোগাযোগ করুন।")
 
-        # যদি ১টি হাউজ থাকে
         if len(user.houses) == 1:
             house = user.houses[0]
             await state.update_data(selected_house_id=house.id)
-            return await show_house_retailer_menu(message, house.id, house.name, permissions)
+            return await show_house_retailer_menu(target, house.id, house.name, permissions)
 
-        # যদি একাধিক হাউজ থাকে
         builder = InlineKeyboardBuilder()
         for h in user.houses:
             builder.button(text=f"🏢 {h.name}", callback_data=f"ret_hsel_{h.id}")
         builder.adjust(1)
-        await message.answer("আপনার একাধিক হাউজ রয়েছে। কোন হাউজের রিটেইলার ম্যানেজ করতে চান?", reply_markup=builder.as_markup())
+        await target.answer("হাউজ নির্বাচন করুন:", reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data == "ret_change_house")
+async def handle_change_house(callback: CallbackQuery, state: FSMContext, permissions: list):
+    """হাউজ পরিবর্তন লজিক"""
+    await state.clear() 
+    await callback.answer("হাউজ পরিবর্তন করা হচ্ছে...")
+    
+    # বর্তমান মেসেজটি মুছে ফেলা যাতে জগাখিচুড়ি না হয়
+    await callback.message.delete()
+    
+    # এখানে callback (event) পাঠানো হচ্ছে, callback.message নয় ✅
+    await retailer_main(callback, state, permissions)
+
+
+
 
 # হাউজ সিলেক্ট করার পর মেনু দেখানোর কলব্যাক
 @router.callback_query(F.data.startswith("ret_hsel_"))
@@ -143,14 +172,21 @@ async def show_house_retailer_menu(message: Message, house_id: int, house_name: 
         builder.button(text="🔍 সার্চ করুন", callback_data="ret_search_start")
     
     if "upload_retailer_excel" in permissions:
-        builder.button(text="📤 এক্সել আপলোড", callback_data="ret_upload_start")
+        builder.button(text="📤 এক্সেল আপলোড", callback_data="ret_upload_start")
         builder.button(text="📥 স্যাম্পল ডাউনলোড", callback_data="ret_sample_dl")
+    
+    # নতুন বাটন: হাউজ পরিবর্তন করার জন্য ✅
+    builder.button(text="🔄 হাউজ পরিবর্তন করুন", callback_data="ret_change_house")
         
     builder.adjust(2)
     text = f"🏪 **রিটেইলার ম্যানেজমেন্ট**\n🏢 হাউজ: **{house_name}**"
-    text += f"\n\n📊 এই হাউজে মোট `{count}` জন রিটেইলার আছে।" if count > 0 else "\n\n⚠️ কোনো রিটেইলার নেই। ফাইল আপলোড করুন।"
+    text += f"\n\n📊 এই হাউজে মোট `{bn_num(count)}` জন রিটেইলার আছে।" if count > 0 else "\n\n⚠️ কোনো রিটেইলার নেই। ফাইল আপলোড করুন।"
     
-    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    # এডিট বা নতুন মেসেজ হ্যান্ডেলিং
+    try:
+        await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    except:
+        await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
 # --- ৪. স্যাম্পল ফাইল ডাউনলোড লজিক ✅ ---
 @router.callback_query(F.data == "ret_sample_dl", flags={"permission": "upload_retailer_excel"})
@@ -190,7 +226,8 @@ async def download_retailer_sample(callback: CallbackQuery):
 # --- ২. এক্সেল ফাইল রিসিভ এবং প্রসেস ✅ ---
 @router.callback_query(F.data == "ret_upload_start", flags={"permission": "upload_retailer_excel"})
 async def upload_start(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("📁 ডিএমএস থেকে ডাউনলোড করা **Retailer List** এক্সেল ফাইলটি পাঠান।")
+    await callback.message.answer("📁 ডিএমএস থেকে ডাউনলোড করা <b>Retailer List</b> এক্সেল ফাইলটি পাঠান।", parse_mode="HTML")
+
     await state.set_state(RetailerStates.waiting_for_excel)
     await callback.answer()
 
@@ -244,8 +281,15 @@ async def list_retailers(callback: CallbackQuery, state: FSMContext, permissions
         retailers = res.scalars().all()
 
         builder = InlineKeyboardBuilder()
+
         for r in retailers:
-            builder.button(text=f"🏪 {r.name} ({r.retailer_code})", callback_data=f"ret_view_{r.id}")
+            # বাটন ফরম্যাট: নাম (আই-টপ নাম্বার)
+            # যদি আই-টপ নাম্বার না থাকে তবে 'N/A' দেখাবে
+            itop = r.itop_number if r.itop_number else "N/A"
+            builder.button(
+                text=f"🏪 {r.name} ({itop})", 
+                callback_data=f"ret_view_{r.id}"
+            )
         builder.adjust(1)
 
         # পেজিনেশন লজিক: যদি ৫ জনের বেশি থাকে তবেই বাটন দেখাবে ✅
@@ -260,7 +304,7 @@ async def list_retailers(callback: CallbackQuery, state: FSMContext, permissions
         
         builder.row(InlineKeyboardButton(text="🔙 মেইন মেনু", callback_data="ret_back_main"))
         
-        await callback.message.edit_text(f"📋 **রিটেইলার তালিকা** (মোট: {total_count} জন):", reply_markup=builder.as_markup())
+        await callback.message.edit_text(f"📋 **রিটেইলার তালিকা** (মোট: {bn_num(total_count)} জন):", reply_markup=builder.as_markup())
 
 # --- ৩. রিটেইলার বিস্তারিত তথ্য (সকল ২০টি কলাম) ---
 @router.callback_query(F.data.startswith("ret_view_"), flags={"permission": "view_retailer"})
@@ -434,14 +478,14 @@ async def final_retailer_delete(callback: CallbackQuery, permissions: list):
 # --- ১. সার্চ শুরু করার ট্রিগার (বাটন ক্লিক) ---
 @router.callback_query(F.data == "ret_search_start", flags={"permission": "view_retailer"})
 async def search_start(callback: CallbackQuery, state: FSMContext):
-    await state.clear() # আগের সব স্টেট ক্লিয়ার করবে
     
     # ইনলাইন বাটন দিয়ে বাতিলের সুযোগ রাখা
     cancel_kb = InlineKeyboardBuilder().button(text="❌ বাতিল করুন", callback_data="ret_list_0").as_markup()
     
     await callback.message.answer(
-        "🔍 **রিটেইলার সার্চ**\n\nরিটেইলারের **নাম** অথবা **কোড (R-Code)** লিখে পাঠান:",
-        reply_markup=cancel_kb
+        "🔍 <b>রিটেইলার সার্চ</b>\n\nরিটেইলারের <b>নাম</b> অথবা <b>কোড (R-Code)</b> লিখে পাঠান:",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
     )
     
     # ইউজারকে সার্চ কুয়েরি স্টেটে নিয়ে যাওয়া
@@ -489,15 +533,21 @@ async def process_search(message: Message, state: FSMContext, permissions: list)
         # রেজাল্ট লিস্ট তৈরি
         builder = InlineKeyboardBuilder()
         for r in retailers:
-            # বাটন টেক্সটে রিটেইলার কোড দেখানো হচ্ছে
-            builder.button(text=f"🏪 {r.name} ({r.retailer_code})", callback_data=f"ret_view_{r.id}")
+            # বাটন ফরম্যাট: নাম (আই-টপ নাম্বার)
+            # যদি আই-টপ নাম্বার না থাকে তবে 'N/A' দেখাবে
+            itop = r.itop_number if r.itop_number else "N/A"
+            builder.button(
+                text=f"🏪 {r.name} ({itop})", 
+                callback_data=f"ret_view_{r.id}"
+            )
+
         
         builder.button(text="🔍 নতুন সার্চ", callback_data="ret_search_start")
         builder.button(text="🔙 ব্যাকে যান", callback_data="ret_list_0")
         builder.adjust(1)
 
         await message.answer(
-            f"✅ <b>সার্চ রেজাল্ট:</b> ({len(retailers)} জন পাওয়া গেছে)\nনিচের বাটনে ক্লিক করে বিস্তারিত দেখুন:",
+            f"✅ <b>সার্চ রেজাল্ট:</b> ({bn_num(len(retailers))} জন পাওয়া গেছে)\nনিচের বাটনে ক্লিক করে বিস্তারিত দেখুন:",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
