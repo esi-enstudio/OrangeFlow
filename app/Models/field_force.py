@@ -19,7 +19,7 @@ class FieldForce(Base):
     agency_id = Column(String, nullable=True) # এজেন্সির ডাটা থাকলে
     
     # বেসিক ইনফো
-    code = Column(String, unique=True, index=True) # DMS Code (R642686)
+    dms_code = Column(String, unique=True, index=True) # DMS Code (R642686)
     name = Column(String, nullable=False)
     phone_number = Column(String, unique=True, index=True)
     personal_number = Column(String, unique=True)

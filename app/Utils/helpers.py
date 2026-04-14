@@ -49,3 +49,53 @@ def bn_num(number):
     # কনভার্সন টেবিল তৈরি
     table = str.maketrans(en_digits, bn_digits)
     return str(number).translate(table)
+
+
+
+
+
+def get_field_force_full_profile_text(m):
+    """ফিল্ড ফোর্সের ৩৮টি ফিল্ডের ডাটা HTML ফরম্যাটে সাজিয়ে দেওয়ার ফাংশন"""
+    def clean(val):
+        return str(val) if val and str(val).lower() != 'nan' else "N/A"
+    
+    return (
+        f"👥 **ফিল্ড ফোর্স বিস্তারিত প্রোফাইল**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>🆔 প্রাথমিক পরিচয় (Basic Info):</b>\n"
+        f"🔹 নাম: {m.name}\n"
+        f"🔹 কোড: `{m.code}`\n"
+        f"🔹 ফোন: {m.phone_number}\n"
+        f"🔹 পার্সোনাল নং: {clean(m.personal_number)}\n"
+        f"🔹 পুল নম্বর: {clean(m.pool_number)}\n"
+        f"🔹 টাইপ: {clean(m.type)} | স্ট্যাটাস: {m.status}\n\n"
+        
+        f"<b>🏦 ব্যাংক তথ্য (Bank Details):</b>\n"
+        f"🔹 ব্যাংক: {clean(m.bank_name)}\n"
+        f"🔹 অ্যাকাউন্ট: {clean(m.bank_account)}\n"
+        f"🔹 ব্রাঞ্চ: {clean(m.branch_name)}\n"
+        f"🔹 রাউটিং নং: {clean(m.routing_number)}\n\n"
+        
+        f"<b>👤 ব্যক্তিগত তথ্য (Personal):</b>\n"
+        f"🔹 বাবার নাম: {clean(m.fathers_name)}\n"
+        f"🔹 মায়ের নাম: {clean(m.mothers_name)}\n"
+        f"🔹 রক্তের গ্রুপ: {clean(m.blood_group)}\n"
+        f"🔹 ধর্ম: {clean(m.religion)} | এনআইডি: {clean(m.nid)}\n"
+        f"🔹 জন্মতারিখ: {clean(m.dob)}\n"
+        f"🔹 হোম টাউন: {clean(m.home_town)}\n\n"
+        
+        f"<b>🎓 শিক্ষা ও অভিজ্ঞতা (Pro):</b>\n"
+        f"🔹 শেষ শিক্ষা: {clean(m.last_education)}\n"
+        f"🔹 প্রতিষ্ঠান: {clean(m.institution_name)}\n"
+        f"🔹 পূর্বের কোম্পানি: {clean(m.previous_company_name)}\n"
+        f"🔹 পূর্বের স্যালারি: {clean(m.previous_company_salary)}\n\n"
+        
+        f"<b>🛠 অফিসিয়াল ও অন্যান্য:</b>\n"
+        f"🔹 জয়েনিং: {clean(m.joining_date)}\n"
+        f"🔹 স্যালারি: {clean(m.salary)}\n"
+        f"🔹 মার্কেট টাইপ: {clean(m.market_type)}\n"
+        f"🔹 বাইক: {clean(m.motor_bike)} | সাইকেল: {clean(m.bicyle)}\n"
+        f"🔹 লাইসেন্স: {clean(m.driving_license)}\n"
+        f"🔹 ঠিকানা: {clean(m.present_address)}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
