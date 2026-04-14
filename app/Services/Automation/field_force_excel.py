@@ -12,7 +12,7 @@ from app.Services.db_service import async_session
 
 logger = logging.getLogger(__name__)
 
-# ৩৮টি কলামের হেডার লিস্ট
+# এক্সেল হেডারের তালিকা
 FF_COLUMNS = [
     'DMS_CODE', 'AGENCY_ID', 'NAME', 'TYPE', 'PHONE_NUMBER', 'PERSONAL_NUMBER', 
     'POOL_NUMBER', 'ASSISTED_RETAILER_CODE', 'SALARY', 'MARKET_TYPE', 
@@ -31,25 +31,30 @@ async def generate_ff_sample(file_path):
 
 async def process_field_force_excel(file_path, house_id, progress_callback=None):
     try:
-        # ১. ডাটা লোড ও কলাম ক্লিনআপ
+        # ১. ডাটা লোড
         df = pd.read_excel(file_path, dtype=str).fillna("")
         df.columns = [c.strip().upper().replace(" ", "_") for c in df.columns]
         
         total_rows = len(df)
-        if total_rows == 0:
-            return 0, "ফাইলটিতে কোনো ডাটা পাওয়া যায়নি।"
+        if total_rows == 0: return 0, "ফাইলটিতে কোনো ডাটা পাওয়া যায়নি।"
+
+        # ২. খালি ভ্যালুকে None (NULL) করার জন্য হেল্পার ফাংশন ✅
+        def clean_val(val, is_unique=False):
+            v = str(val).strip()
+            if v == "" or v.lower() == "nan":
+                return None # খালি থাকলে ডাটাবেজে NULL যাবে
+            return v
 
         async with async_session() as session:
             count = 0
             for index, row in df.iterrows():
-                dms_code_val = row.get('DMS_CODE', '').strip()
-                name_val = row.get('NAME', '').strip()
+                dms_code_val = clean_val(row.get('DMS_CODE'))
+                name_val = clean_val(row.get('NAME'))
                 
-                if not dms_code_val or not name_val:
-                    continue
+                if not dms_code_val or not name_val: continue
 
-                # ২. Retailer ID এবং User ID বের করা
-                r_helper_code = row.get('ASSISTED_RETAILER_CODE', '').strip()
+                # ৩. রিটেইলার ও ইউজার আইডি বের করা
+                r_helper_code = clean_val(row.get('ASSISTED_RETAILER_CODE'))
                 target_retailer_id = None
                 if r_helper_code:
                     r_res = await session.execute(
@@ -57,86 +62,73 @@ async def process_field_force_excel(file_path, house_id, progress_callback=None)
                     )
                     target_retailer_id = r_res.scalar_one_or_none()
 
-                p_phone = row.get('PERSONAL_NUMBER', '').strip()
+                # পার্সোনাল ফোন দিয়ে ইউজার ম্যাপিং
+                p_phone_raw = clean_val(row.get('PERSONAL_NUMBER'))
                 target_user_id = None
-                if p_phone:
-                    clean_phone = p_phone if p_phone.startswith('0') else f"0{p_phone}"
+                if p_phone_raw:
+                    clean_phone = p_phone_raw if p_phone_raw.startswith('0') else f"0{p_phone_raw}"
                     u_res = await session.execute(select(User.id).where(User.phone_number == clean_phone))
                     target_user_id = u_res.scalar_one_or_none()
 
-                # ৩. ডাটা ডিকশনারি তৈরি (মডেলের কলাম নাম অনুযায়ী নিখুঁত ম্যাপিং) ✅
-                # বি.প্র: মডেলের relationship এবং bicyle বানান চেক করা হয়েছে
+                # ৪. ডাটা ম্যাপ করা (ইউনিক ফিল্ডগুলোতে clean_val নিশ্চিত করা হয়েছে) ✅
                 data_map = {
                     "house_id": house_id,
                     "user_id": target_user_id,
                     "retailer_id": target_retailer_id,
                     "dms_code": dms_code_val,
-                    "agency_id": row.get('AGENCY_ID', '').strip(),
+                    "agency_id": clean_val(row.get('AGENCY_ID')),
                     "name": name_val,
-                    "type": row.get('TYPE', 'SR').strip().upper(),
-                    "phone_number": row.get('PHONE_NUMBER', '').strip(),
-                    "personal_number": p_phone,
-                    "pool_number": row.get('POOL_NUMBER', '').strip(),
-                    "salary": row.get('SALARY', '').strip(),
-                    "market_type": row.get('MARKET_TYPE', '').strip(),
-                    "joining_date": row.get('JOINING_DATE', '').strip(),
-                    "resigned_date": row.get('RESIGNED_DATE', '').strip(),
-                    "religion": row.get('RELIGION', '').strip(),
-                    "dob": row.get('DOB', '').strip(),
-                    "nid": row.get('NID', '').strip(),
-                    "bank_name": row.get('BANK_NAME', '').strip(),
-                    "bank_account": row.get('BANK_ACCOUNT', '').strip(),
-                    "branch_name": row.get('BRANCH_NAME', '').strip(),
-                    "routing_number": row.get('ROUTING_NUMBER', '').strip(),
-                    "home_town": row.get('HOME_TOWN', '').strip(),
-                    "emergency_contact_person_name": row.get('EMERGENCY_CONTACT_PERSON_NAME', '').strip(),
-                    "emergency_contact_person_number": row.get('EMERGENCY_CONTACT_PERSON_NUMBER', '').strip(),
-                    "relationship": row.get('RELATIONSHIP', '').strip(), # মডেল নাম: relationship ✅
-                    "last_education": row.get('LAST_EDUCATION', '').strip(),
-                    "institution_name": row.get('INSTITUTION_NAME', '').strip(),
-                    "blood_group": row.get('BLOOD_GROUP', '').strip(),
-                    "present_address": row.get('PRESENT_ADDRESS', '').strip(),
-                    "permanent_address": row.get('PERMANENT_ADDRESS', '').strip(),
-                    "fathers_name": row.get('FATHERS_NAME', '').strip(),
-                    "mothers_name": row.get('MOTHERS_NAME', '').strip(),
-                    "previous_company_name": row.get('PREVIOUS_COMPANY_NAME', '').strip(),
-                    "previous_company_salary": row.get('PREVIOUS_COMPANY_SALARY', '').strip(),
-                    "motor_bike": row.get('MOTOR_BIKE', '').strip(),
-                    "bicyle": row.get('BICYCLE', '').strip(), # মডেল নাম: bicyle ✅
-                    "driving_license": row.get('DRIVING_LICENSE', '').strip(),
-                    "status": row.get('STATUS', 'Active').strip()
+                    "phone_number": clean_val(row.get('PHONE_NUMBER')), # Unique
+                    "personal_number": p_phone_raw,                    # Unique
+                    "pool_number": clean_val(row.get('POOL_NUMBER')),   # Unique
+                    "type": (clean_val(row.get('TYPE')) or "SR").upper(),
+                    "status": clean_val(row.get('STATUS')) or "Active",
+                    "bank_name": clean_val(row.get('BANK_NAME')),
+                    "bank_account": clean_val(row.get('BANK_ACCOUNT')),
+                    "branch_name": clean_val(row.get('BRANCH_NAME')),
+                    "routing_number": clean_val(row.get('ROUTING_NUMBER')),
+                    "home_town": clean_val(row.get('HOME_TOWN')),
+                    "emergency_contact_person_name": clean_val(row.get('EMERGENCY_CONTACT_PERSON_NAME')),
+                    "emergency_contact_person_number": clean_val(row.get('EMERGENCY_CONTACT_PERSON_NUMBER')),
+                    "emergency_person_relationship": clean_val(row.get('RELATIONSHIP')),
+                    "last_education": clean_val(row.get('LAST_EDUCATION')),
+                    "institution_name": clean_val(row.get('INSTITUTION_NAME')),
+                    "blood_group": clean_val(row.get('BLOOD_GROUP')),
+                    "present_address": clean_val(row.get('PRESENT_ADDRESS')),
+                    "permanent_address": clean_val(row.get('PERMANENT_ADDRESS')),
+                    "fathers_name": clean_val(row.get('FATHERS_NAME')),
+                    "mothers_name": clean_val(row.get('MOTHERS_NAME')),
+                    "religion": clean_val(row.get('RELIGION')),
+                    "dob": clean_val(row.get('DOB')),
+                    "nid": clean_val(row.get('NID')),
+                    "previous_company_name": clean_val(row.get('PREVIOUS_COMPANY_NAME')),
+                    "previous_company_salary": clean_val(row.get('PREVIOUS_COMPANY_SALARY')),
+                    "motor_bike": clean_val(row.get('MOTOR_BIKE')),
+                    "bicyle": clean_val(row.get('BICYCLE')),
+                    "driving_license": clean_val(row.get('DRIVING_LICENSE')),
+                    "joining_date": clean_val(row.get('JOINING_DATE')),
+                    "resigned_date": clean_val(row.get('RESIGNED_DATE')),
+                    "market_type": clean_val(row.get('MARKET_TYPE')),
+                    "salary": clean_val(row.get('SALARY')),
                 }
 
-                # ৪. SQL Statement তৈরি
+                # ৫. SQL Upsert
                 stmt = insert(FieldForce).values(**data_map)
-
-                # ৫. আপডেট ডিকশনারি (যেগুলো কনফ্লিক্ট হলে পরিবর্তন করা যাবে)
-                # dms_code এবং house_id বাদে বাকি সব আপডেট হবে
                 update_cols = {k: v for k, v in data_map.items() if k not in ['dms_code', 'house_id']}
                 update_cols['updated_at'] = func.now()
 
-                # Upsert কার্যকর করা
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=['dms_code'],
-                    set_=update_cols
-                )
-                
+                stmt = stmt.on_conflict_do_update(index_elements=['dms_code'], set_=update_cols)
                 await session.execute(stmt)
                 count += 1
 
-                # ৬. লাইভ প্রগ্রেস আপডেট
+                # ৬. প্রগ্রেস আপডেট
                 if progress_callback and (count % 10 == 0 or count == total_rows):
                     percent = round((count / total_rows) * 100)
-                    progress_text = (
-                        f"⏳ **আপলোড প্রগ্রেস:** {percent}%\n"
-                        f"📈 প্রসেস হয়েছে: `{count}` / `{total_rows}`\n"
-                        f"🏢 হাউজ আইডি: `{house_id}`"
-                    )
-                    await progress_callback(progress_text)
+                    await progress_callback(f"⏳ **আপলোড প্রগ্রেস:** {percent}%\n📈 প্রসেস হয়েছে: `{count}` / `{total_rows}`")
 
             await session.commit()
             return count, None
 
     except Exception as e:
-        logger.error(f"❌ Excel Processing Error: {str(e)}")
+        logger.error(f"Excel Error: {str(e)}")
         return 0, f"প্রসেসিং এরর: {str(e)}"

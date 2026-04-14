@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from app.Services.db_service import async_session
 from app.Models.user import User
-from app.Models.role import Role, Permission # Permission মডেল ইম্পোর্ট করুন
+from app.Models.role import Role, Permission
+from app.Models.field_force import FieldForce
 from config.settings import SUPER_ADMIN_ID
 
 class ACLMiddleware(BaseMiddleware):
@@ -55,3 +56,12 @@ class ACLMiddleware(BaseMiddleware):
                 return await event.answer(f"❌ আপনার এই কাজের অনুমতি নেই। (প্রয়োজন: {required_permission})")
 
         return await handler(event, data)
+
+
+async def is_owner(user_id, target_ff_id):
+    """চেক করবে এই ইউজার কি ওই ফিল্ড ফোর্স প্রোফাইলের মালিক কি না"""
+    async with async_session() as session:
+        res = await session.execute(
+            select(FieldForce.id).where(FieldForce.user_id == user_id, FieldForce.id == target_ff_id)
+        )
+        return res.scalar_one_or_none() is not None

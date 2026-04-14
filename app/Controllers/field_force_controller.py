@@ -16,6 +16,9 @@ from app.Models.house import House
 
 from app.Services.db_service import async_session
 from app.Services.Automation.field_force_excel import process_field_force_excel, generate_ff_sample, generate_ff_sample
+from app.Utils.helpers import bn_num
+from config.settings import SUPER_ADMIN_ID
+
 
 from app.Views.keyboards.inline import (
     get_field_force_house_selection_kb,
@@ -108,26 +111,47 @@ async def change_house_ff(callback: CallbackQuery, state: FSMContext):
 # ২. মডিউল ড্যাশবোর্ড (Render Logic)
 # ==========================================
 async def render_ff_main(message: Message, house_id: int, is_callback=False):
+    user_tg_id = message.chat.id # ইউজারের টেলিগ্রাম আইডি
+    
     async with async_session() as session:
+        # ১. চেক করা ইউজার কি সুপার এডমিন কি না
+        is_super_admin = (int(user_tg_id) == int(SUPER_ADMIN_ID))
+        
+        # ২. ইউজারের পারমিশন চেক (মিডলওয়্যার থেকে যা পাওয়া যাবে)
+        # ধরা যাক আপনার রোলে 'view_all_field_force' নামে একটি পারমিশন আছে
+        
+        # ৩. এই ইউজারের সাথে কোন প্রোফাইল লিঙ্ক করা আছে কি না দেখা
+        ff_res = await session.execute(
+            select(FieldForce.id).where(FieldForce.user_id == (
+                select(User.id).where(User.telegram_id == user_tg_id).scalar_subquery()
+            ))
+        )
+        personal_ff_id = ff_res.scalar_one_or_none()
+        
         house = await session.get(House, house_id)
         total_count = await session.scalar(
             select(func.count(FieldForce.id)).where(FieldForce.house_id == house_id)
         )
-        
-        # পারমিশন লিস্ট মিডলওয়্যার থেকে নেওয়ার ব্যবস্থা (এখানে ডামি হিসেবে সব দেওয়া হলো)
-        permissions = ["view_field_force", "create_field_force", "edit_field_force", "delete_field_force"]
 
         text = (
             f"🏪 **ফিল্ড ফোর্স ম্যানেজমেন্ট**\n"
             f"🏢 হাউজ: **{house.name}**\n\n"
-            f"📊 এই হাউজে মোট **{total_count}** জন মেম্বার আছে।"
+            f"📊 মোট মেম্বার: **{bn_num(total_count)}** জন"
         )
         
-        # কিবোর্ড কল করার সময় total_count পাঠানো হচ্ছে ✅
-        kb = get_field_force_main_kb(house_id, total_count, permissions)
+        # ৪. এডমিন ভিউ বনাম পার্সোনাল ভিউ সিদ্ধান্ত
+        # যদি সুপার এডমিন হয় অথবা যার কাছে 'manage_field_force' পারমিশন আছে
+        is_admin_view = is_super_admin # প্রয়োজনে এখানে পারমিশন চেক যোগ করবেন
+        
+        kb = get_field_force_main_kb(
+            house_id, total_count, [], 
+            is_admin=is_admin_view, 
+            personal_ff_id=personal_ff_id
+        )
         
         if is_callback: await message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
         else: await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
 
 @router.callback_query(F.data.startswith("ff_back_main_"))
 async def back_to_ff_main(callback: CallbackQuery):
@@ -158,7 +182,7 @@ async def handle_ff_list(callback: CallbackQuery):
         if not members:
             return await callback.answer("⚠️ কোনো মেম্বার পাওয়া যায়নি।", show_alert=True)
 
-        text = f"📋 **মেম্বার তালিকা** (মোট: {total} জন):"
+        text = f"📋 **মেম্বার তালিকা** (মোট: {bn_num(total)} জন):"
         kb = get_ff_pagination_kb(members, page, total_pages, house_id)
         
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -170,32 +194,72 @@ async def handle_ff_list(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("ff_view_"), flags={"permission": "view_field_force"})
 async def view_ff_profile(callback: CallbackQuery):
     ff_id = int(callback.data.split("_")[2])
+    user_tg_id = callback.from_user.id
+    
     async with async_session() as session:
+        # ১. ডাটাবেজ থেকে ফিল্ড ফোর্স মেম্বারের ডাটা নেওয়া
         m = await session.get(FieldForce, ff_id)
-        if not m: return await callback.answer("❌ মেম্বার পাওয়া যায়নি।")
+        if not m: 
+            return await callback.answer("❌ মেম্বার পাওয়া যায়নি।", show_alert=True)
 
-        # আমাদের নতুন হেল্পার মেথড কল করা
+        # ২. সিকিউরিটি চেক: ইউজার কি সুপার এডমিন অথবা এই প্রোফাইলের মালিক? ✅
+        is_super_admin = (int(user_tg_id) == int(SUPER_ADMIN_ID))
+        
+        # ইউজারের ডাটাবেজ আইডি বের করা (মালিকানা চেক করার জন্য)
+        db_user_id = await session.scalar(select(User.id).where(User.telegram_id == user_tg_id))
+        
+        if not is_super_admin and m.user_id != db_user_id:
+            return await callback.answer("🚫 আপনি শুধুমাত্র নিজের প্রোফাইল দেখার অনুমতি রাখেন!", show_alert=True)
+
+        # ৩. প্রোফাইল টেক্সট জেনারেট করা (Helper Function থেকে)
         from app.Utils.helpers import get_field_force_full_profile_text
         details = get_field_force_full_profile_text(m)
         
-        # অ্যাকশন কিবোর্ড
-        kb = get_ff_action_kb(m.id, m.house_id, m.status, ["edit_field_force", "delete_field_force"])
-        await callback.message.edit_text(details, reply_markup=kb, parse_mode="HTML")
+        # ৪. অ্যাকশন কিবোর্ড জেনারেট করা
+        # এখানে আমরা চেক করছি—যদি সে মালিক হয় কিন্তু সুপার এডমিন না হয়, সে কি এডিট করতে পারবে?
+        # আপাতত সুপার এডমিনকে সব পারমিশন দিচ্ছি, অন্যদের ক্ষেত্রে শুধু 'তথ্য এডিট' বাটন থাকবে
+        from app.Views.keyboards.inline import get_ff_action_kb
+        
+        # আপনার মিডলওয়্যার থেকে পাওয়া পারমিশন লিস্ট ব্যবহার করুন (যদি থাকে)
+        # অথবা সিম্পল লজিক:
+        perms = ["edit_field_force"] # সাধারণ ইউজারের জন্য ডিফল্ট
+        if is_super_admin:
+            perms.append("delete_field_force")
+        
+        kb = get_ff_action_kb(m.id, m.house_id, m.status, perms)
+        
+        # ৫. মেসেজ আপডেট করা
+        try:
+            await callback.message.edit_text(details, reply_markup=kb, parse_mode="HTML")
+        except Exception as e:
+            # যদি মেসেজ এডিট করতে সমস্যা হয় (যেমন: একই ডাটা), তবে নতুন মেসেজ পাঠাবে
+            await callback.message.answer(details, reply_markup=kb, parse_mode="HTML")
+            
     await callback.answer()
 
 
 # --- এডিট ক্যাটাগরি সিলেকশন ---
 @router.callback_query(F.data.startswith("ff_edit_"), flags={"permission": "edit_field_force"})
 async def show_edit_categories(callback: CallbackQuery):
-    ff_id = int(callback.data.split("_")[2])
-    # এটি চেক করবে এটি কি সরাসরি ff_edit_ আইডি নাকি ff_edit_cat_
+    data_parts = callback.data.split("_")
+    # সব সময় শেষের এলিমেন্টটি আইডি হিসেবে নিবে (নিরাপদ পদ্ধতি)
+    ff_id = int(data_parts[-1]) 
+
     if "cat_" in callback.data:
-        parts = callback.data.split("_")
-        cat = parts[3]
-        ff_id = int(parts[4])
-        await callback.message.edit_text("কোন ফিল্ডটি আপডেট করতে চান?", reply_markup=get_ff_fields_by_category_kb(cat, ff_id))
+        # এটি ক্যাটাগরি সিলেকশন (Format: ff_edit_cat_cat_name_ID)
+        # এখানে ৩ নম্বর এবং ৪ নম্বর পার্ট মিলে ক্যাটাগরি নাম তৈরি হবে
+        category = f"{data_parts[2]}_{data_parts[3]}" # যেমন: cat_basic
+        await callback.message.edit_text(
+            "কোন ফিল্ডটি আপডেট করতে চান?", 
+            reply_markup=get_ff_fields_by_category_kb(category, ff_id)
+        )
     else:
-        await callback.message.edit_text("কোন ধরণের তথ্য এডিট করতে চান?", reply_markup=get_ff_edit_categories_kb(ff_id))
+        # এটি প্রাথমিক এডিট বাটন ক্লিক (Format: ff_edit_ID)
+        await callback.message.edit_text(
+            "কোন ধরণের তথ্য এডিট করতে চান?", 
+            reply_markup=get_ff_edit_categories_kb(ff_id)
+        )
+    await callback.answer()
 
 
 
@@ -214,17 +278,36 @@ async def toggle_ff_status(callback: CallbackQuery):
 # ==========================================
 @router.callback_query(F.data.startswith("ff_edit_"), flags={"permission": "edit_field_force"})
 async def start_ff_edit(callback: CallbackQuery):
-    ff_id = int(callback.data.split("_")[2])
-    await callback.message.edit_text("কোন তথ্যটি আপডেট করতে চান?", reply_markup=get_ff_edit_fields_kb(ff_id))
+    # ডাটা পার্টস আলাদা করা
+    data_parts = callback.data.split("_")
+    
+    # যদি এটি ক্যাটাগরি সিলেকশন না হয় (শুধু ff_edit_ID হয়)
+    if "cat_" not in callback.data:
+        ff_id = int(data_parts[2])
+        # পুরনো 'get_ff_edit_fields_kb' এর বদলে নতুনটি কল করুন
+        await callback.message.edit_text(
+            "কোন ধরণের তথ্য এডিট করতে চান?", 
+            reply_markup=get_ff_edit_categories_kb(ff_id) # সঠিক নাম ✅
+        )
+    else:
+        # যদি ইতিমধ্যে ক্যাটাগরিতে থাকে, তবে সেটি 'show_edit_categories' হ্যান্ডেল করবে
+        # তাই এখানে অতিরিক্ত কিছু করার দরকার নেই, শুধু কলব্যাক পাস করুন।
+        await show_edit_categories(callback)
+        
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("ff_field_"))
 async def process_field_selection(callback: CallbackQuery, state: FSMContext):
-    parts = callback.data.split("_")
-    field = parts[2]
-    ff_id = int(parts[3])
+    data_parts = callback.data.split("_")
+    # শেষ অংশ আইডি এবং মাঝের অংশগুলো ফিল্ডের নাম
+    ff_id = int(data_parts[-1])
+    field = "_".join(data_parts[2:-1]) # যেমন: phone_number
     
     await state.update_data(edit_ff_id=ff_id, edit_field=field)
-    await callback.message.answer(f"নতুন **{field.replace('_', ' ').capitalize()}** লিখে পাঠান:")
+    
+    # সুন্দর নাম দেখানোর জন্য
+    display_name = field.replace('_', ' ').capitalize()
+    await callback.message.answer(f"মেম্বারের নতুন **{display_name}** লিখে পাঠান:")
     await state.set_state(FFStates.editing_value)
     await callback.answer()
 
@@ -266,14 +349,17 @@ async def start_ff_search(callback: CallbackQuery, state: FSMContext):
 async def perform_ff_search(message: Message, state: FSMContext):
     query = message.text.strip()
     data = await state.get_data()
-    house_id = data['search_house_id']
+    house_id = data.get('search_house_id')
 
     async with async_session() as session:
-        # নাম অথবা কোড দিয়ে সার্চ
+        # নাম অথবা dms_code দিয়ে সার্চ
         res = await session.execute(
             select(FieldForce).where(
                 FieldForce.house_id == house_id,
-                or_(FieldForce.name.icontains(query), FieldForce.code.icontains(query))
+                or_(
+                    FieldForce.name.icontains(query), 
+                    FieldForce.dms_code.icontains(query) # এখানে dms_code সঠিক ছিল
+                )
             )
         )
         results = res.scalars().all()
@@ -283,7 +369,9 @@ async def perform_ff_search(message: Message, state: FSMContext):
         
         builder = InlineKeyboardBuilder()
         for r in results:
-            builder.button(text=f"👤 {r.name} ({r.code})", callback_data=f"ff_view_{r.id}")
+            # পরিবর্তন: r.code -> r.dms_code করা হয়েছে ✅ (এটিই ৩১৭ নম্বর লাইনের এরর ছিল)
+            builder.button(text=f"👤 {r.name} ({r.dms_code})", callback_data=f"ff_view_{r.id}")
+            
         builder.button(text="🔙 ব্যাকে যান", callback_data=f"ff_back_main_{house_id}")
         builder.adjust(1)
         
@@ -313,6 +401,11 @@ async def handle_excel_upload(message: Message, state: FSMContext):
     
     if not house_id:
         return await message.answer("❌ সেশন এরর! অনুগ্রহ করে আবার হাউজ সিলেক্ট করে চেষ্টা করুন।")
+    
+    # --- হাউজের নাম খুঁজে বের করা ✅ ---
+    async with async_session() as session:
+        house = await session.get(House, house_id)
+        h_name = house.name if house else "অজানা হাউজ"
 
     # ৩. ইনপুট ফাইল পাথ তৈরি এবং ডাউনলোড
     file_path = f"temp_ff_{message.from_user.id}.xlsx"
@@ -325,13 +418,13 @@ async def handle_excel_upload(message: Message, state: FSMContext):
         # ৪. লাইভ আপডেট পাঠানোর ইন্টারনাল ফাংশন
         async def update_telegram_progress(text):
             try:
-                # একই টেক্সট হলে বা টেলিগ্রাম রেট লিমিট থাকলে এটি এরর দিতে পারে, তাই try-except
-                await wait_msg.edit_text(text, parse_mode="Markdown")
+                # এখানেও হাউজের নাম ব্যবহার করা হয়েছে
+                updated_text = f"{text}\n🏢 হাউজ: **{h_name}**"
+                await wait_msg.edit_text(updated_text, parse_mode="Markdown")
             except:
                 pass
 
         # ৫. এক্সেল প্রসেসিং সার্ভিস কল (প্রগ্রেস কলব্যাক সহ)
-        
         count, err = await process_field_force_excel(
             file_path=file_path, 
             house_id=house_id, 
@@ -340,14 +433,12 @@ async def handle_excel_upload(message: Message, state: FSMContext):
         
         # ৬. রেজাল্ট হ্যান্ডেলিং
         if err:
-            await wait_msg.edit_text(f"❌ **প্রসেসিং ব্যর্থ হয়েছে!**\n\nএরর: `{err}`", parse_mode="Markdown")
+            await wait_msg.edit_text(f"❌ **প্রসেসিং ব্যর্থ হয়েছে!**\n\nহাউজ: {h_name}\nএরর: `{err}`")
         else:
-            # সফল হলে কনসোলেও মেসেজ দিবে
-            print(f"✅ সফলভাবে {count}টি রেকর্ড ডাটাবেজে ইনসার্ট/আপডেট হয়েছে।")
             await wait_msg.edit_text(
                 f"✅ **আপলোড সম্পন্ন হয়েছে!**\n\n"
-                f"📊 মোট রেকর্ড: `{count}` টি\n"
-                f"🏢 হাউজ আইডি: `{house_id}`",
+                f"📊 মোট রেকর্ড: `{bn_num(count)}` টি\n"
+                f"🏢 হাউজ: **{h_name}**", # আইডি এর বদলে নাম ✅
                 parse_mode="Markdown"
             )
 
@@ -355,15 +446,11 @@ async def handle_excel_upload(message: Message, state: FSMContext):
         await wait_msg.edit_text(f"❌ **সিস্টেম এরর:** {str(e)}")
 
     finally:
-        # ৭. টেম্পোরারি ফাইল ক্লিনআপ
         if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except:
-                pass
-        
-        # ৮. স্টেট ক্লিয়ার করা
+            try: os.remove(file_path)
+            except: pass
         await state.clear()
+
 
 @router.callback_query(F.data.startswith("ff_del_conf_"), flags={"permission": "delete_field_force"})
 async def confirm_delete(callback: CallbackQuery):

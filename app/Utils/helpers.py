@@ -64,7 +64,7 @@ def get_field_force_full_profile_text(m):
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>🆔 প্রাথমিক পরিচয় (Basic Info):</b>\n"
         f"🔹 নাম: {m.name}\n"
-        f"🔹 কোড: `{m.code}`\n"
+        f"🔹 কোড: `{m.dms_code}`\n"
         f"🔹 ফোন: {m.phone_number}\n"
         f"🔹 পার্সোনাল নং: {clean(m.personal_number)}\n"
         f"🔹 পুল নম্বর: {clean(m.pool_number)}\n"

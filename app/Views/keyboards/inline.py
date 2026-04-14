@@ -13,36 +13,39 @@ def get_field_force_house_selection_kb(houses):
     builder.adjust(1)
     return builder.as_markup()
 
-def get_field_force_main_kb(house_id, total_count, permissions: list):
-    """ফিল্ড ফোর্স মেইন ড্যাশবোর্ড (ডাটা না থাকলে বাটন হাইড হবে)"""
+
+
+
+def get_field_force_main_kb(house_id, total_count, permissions: list, is_admin: bool, personal_ff_id: int = None):
     builder = InlineKeyboardBuilder()
     
-    # ১ম রো: লিস্ট এবং সার্চ (শুধুমাত্র ডাটা থাকলে দেখাবে) ✅
-    if total_count > 0:
-        row1 = []
-        if "view_field_force" in permissions:
-            row1.append(InlineKeyboardButton(text="📋 লিস্ট দেখুন", callback_data=f"ff_list_{house_id}_1"))
-            row1.append(InlineKeyboardButton(text="🔍 সার্চ করুন", callback_data=f"ff_search_{house_id}"))
-        if row1: builder.row(*row1)
+    if is_admin:
+        # এডমিনরা লিস্ট এবং সার্চ বাটন দেখবে
+        if total_count > 0:
+            builder.row(
+                InlineKeyboardButton(text="📋 সকল মেম্বার", callback_data=f"ff_list_{house_id}_1"),
+                InlineKeyboardButton(text="🔍 মেম্বার সার্চ", callback_data=f"ff_search_{house_id}")
+            )
+        if "create_field_force" in permissions:
+            builder.row(InlineKeyboardButton(text="📤 এক্সেল আপলোড", callback_data=f"ff_upload_{house_id}"))
+    else:
+        # সাধারণ ইউজার (SR/BP) শুধু তার নিজের প্রোফাইল বাটন দেখবে
+        if personal_ff_id:
+            builder.row(InlineKeyboardButton(text="👤 আমার প্রোফাইল", callback_data=f"ff_view_{personal_ff_id}"))
+        else:
+            builder.row(InlineKeyboardButton(text="⚠️ প্রোফাইল লিঙ্ক করা নেই", callback_data="none"))
 
-    # ২য় রো: আপলোড এবং স্যাম্পল ডাউনলোড
-    row2 = []
-    if "create_field_force" in permissions:
-        row2.append(InlineKeyboardButton(text="📤 এক্সেল আপলোড", callback_data=f"ff_upload_{house_id}"))
-    # স্যাম্পল ডাউনলোড বাটন (callback_data ফিক্স করা হয়েছে) ✅
-    row2.append(InlineKeyboardButton(text="📥 স্যাম্পল ডাউনলোড", callback_data="ff_sample_dl"))
-    if row2: builder.row(*row2)
-
-    # ৩য় রো: হাউস পরিবর্তন
+    builder.row(InlineKeyboardButton(text="📥 স্যাম্পল ডাউনলোড", callback_data="ff_sample_dl"))
     builder.row(InlineKeyboardButton(text="🔄 হাউজ পরিবর্তন করুন", callback_data="ff_change_house"))
     
     return builder.as_markup()
+
 
 def get_ff_pagination_kb(members, page, total_pages, house_id):
     """মেম্বার লিস্ট ও নেভিগেশন"""
     builder = InlineKeyboardBuilder()
     for m in members:
-        builder.button(text=f"👤 {m.name} ({m.code})", callback_data=f"ff_view_{m.id}")
+        builder.button(text=f"👤 {m.name} ({m.dms_code})", callback_data=f"ff_view_{m.id}")
     builder.adjust(1)
 
     nav_btns = []
