@@ -10,7 +10,7 @@ class Retailer(Base):
     house_id = Column(Integer, ForeignKey('houses.id'), nullable=False)
     
     # আপনার দেওয়া নির্দিষ্ট কলামসমূহ
-    code = Column(String, unique=True, index=True) # RETAILER_CODE
+    retailer_code = Column(String, unique=True, index=True) # RETAILER_CODE
     name = Column(String, nullable=False)          # RETAILER_NAME
     type = Column(String)                          # RETAILER_TYPE
     enabled = Column(String)                       # ENABLED (Yes/No)
