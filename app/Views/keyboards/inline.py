@@ -14,28 +14,31 @@ def get_field_force_house_selection_kb(houses):
     return builder.as_markup()
 
 
-
-
 def get_field_force_main_kb(house_id, total_count, permissions: list, is_admin: bool, personal_ff_id: int = None):
     builder = InlineKeyboardBuilder()
-    
-    if is_admin:
-        # এডমিনরা লিস্ট এবং সার্চ বাটন দেখবে
+
+    # এডমিন ভিউ (সুপার এডমিন বা ম্যানেজার রোলের জন্য)
+    if is_admin or "view_field_force" in permissions:
+        # ১ম রো: লিস্ট এবং সার্চ
         if total_count > 0:
             builder.row(
-                InlineKeyboardButton(text="📋 সকল মেম্বার", callback_data=f"ff_list_{house_id}_1"),
-                InlineKeyboardButton(text="🔍 মেম্বার সার্চ", callback_data=f"ff_search_{house_id}")
+                InlineKeyboardButton(text="📋 লিস্ট দেখুন", callback_data=f"ff_list_{house_id}_1"),
+                InlineKeyboardButton(text="🔍 সার্চ করুন", callback_data=f"ff_search_{house_id}")
             )
-        if "create_field_force" in permissions:
-            builder.row(InlineKeyboardButton(text="📤 এক্সেল আপলোড", callback_data=f"ff_upload_{house_id}"))
-    else:
-        # সাধারণ ইউজার (SR/BP) শুধু তার নিজের প্রোফাইল বাটন দেখবে
-        if personal_ff_id:
-            builder.row(InlineKeyboardButton(text="👤 আমার প্রোফাইল", callback_data=f"ff_view_{personal_ff_id}"))
-        else:
-            builder.row(InlineKeyboardButton(text="⚠️ প্রোফাইল লিঙ্ক করা নেই", callback_data="none"))
+    
+    # ২য় রো: আপলোড বাটন (সুপার এডমিন হলে সবসময় দেখবে) ✅
+        row2 = []
+        if is_admin or "create_field_force" in permissions:
+            row2.append(InlineKeyboardButton(text="📤 এক্সেল আপলোড", callback_data=f"ff_upload_{house_id}"))
+        
+        row2.append(InlineKeyboardButton(text="📥 স্যাম্পল ডাউনলোড", callback_data="ff_sample_dl"))
+        builder.row(*row2)
 
-    builder.row(InlineKeyboardButton(text="📥 স্যাম্পল ডাউনলোড", callback_data="ff_sample_dl"))
+    # সাধারণ ইউজার ভিউ (যদি সে এডমিন না হয় কিন্তু তার প্রোফাইল থাকে)
+    if not is_admin and personal_ff_id:
+        builder.row(InlineKeyboardButton(text="👤 আমার প্রোফাইল", callback_data=f"ff_view_{personal_ff_id}"))
+
+    # ৩য় রো: হাউস পরিবর্তন
     builder.row(InlineKeyboardButton(text="🔄 হাউজ পরিবর্তন করুন", callback_data="ff_change_house"))
     
     return builder.as_markup()
@@ -77,38 +80,45 @@ def get_ff_action_kb(ff_id, house_id, status, permissions: list):
 def get_ff_edit_categories_kb(ff_id):
     """এডিট করার জন্য ক্যাটাগরি সিলেকশন মেনু"""
     builder = InlineKeyboardBuilder()
+    # ক্যাটাগরি লিস্ট (নাম, কী)
     categories = [
-        ("🆔 প্রাথমিক পরিচয়", "cat_basic"),
-        ("🏦 ব্যাংক তথ্য", "cat_bank"),
-        ("👤 ব্যক্তিগত তথ্য", "cat_personal"),
-        ("🎓 শিক্ষা ও প্রফেশনাল", "cat_pro"),
-        ("🛠 অফিসিয়াল ও অন্যান্য", "cat_office")
+        ("🆔 প্রাথমিক পরিচয়", "basic"),
+        ("🏦 ব্যাংক তথ্য", "bank"),
+        ("👤 ব্যক্তিগত তথ্য", "personal"),
+        ("🎓 শিক্ষা ও প্রফেশনাল", "pro"),
+        ("🛠 অফিসিয়াল ও অন্যান্য", "office")
     ]
-    for label, cat in categories:
-        builder.button(text=label, callback_data=f"ff_edit_cat_{cat}_{ff_id}")
+    for label, cat_key in categories:
+        # ফরম্যাট: ff_ecat_{key}_{id} -> ff_ecat_basic_1
+        builder.button(text=label, callback_data=f"ff_ecat_{cat_key}_{ff_id}")
     
     builder.button(text="🔙 প্রোফাইলে ফিরুন", callback_data=f"ff_view_{ff_id}")
     builder.adjust(1)
     return builder.as_markup()
 
-def get_ff_fields_by_category_kb(category, ff_id):
-    """ক্যাটাগরি অনুযায়ী নির্দিষ্ট ফিল্ড সিলেকশন বাটন"""
+def get_ff_fields_by_category_kb(category_key, ff_id):
+    """নির্দিষ্ট ক্যাটাগরির ফিল্ডসমূহ"""
     builder = InlineKeyboardBuilder()
     
+    # কী অনুযায়ী ফিল্ড ম্যাপ
     fields_map = {
-        "cat_basic": [("নাম", "name"), ("কোড", "code"), ("ফোন", "phone_number"), ("পার্সোনাল নং", "personal_number"), ("পুল নং", "pool_number"), ("টাইপ", "type")],
-        "cat_bank": [("ব্যাংক নাম", "bank_name"), ("অ্যাকাউন্ট", "bank_account"), ("ব্রাঞ্চ", "branch_name"), ("রাউটিং নং", "routing_number")],
-        "cat_personal": [("বাবার নাম", "fathers_name"), ("মায়ের নাম", "mothers_name"), ("এনআইডি", "nid"), ("জন্মতারিখ", "dob"), ("রক্তের গ্রুপ", "blood_group"), ("ধর্ম", "religion"), ("হোম টাউন", "home_town")],
-        "cat_pro": [("শিক্ষা", "last_education"), ("প্রতিষ্ঠান", "institution_name"), ("পূর্বের কোম্পানি", "previous_company_name"), ("পূর্বের স্যালারি", "previous_company_salary")],
-        "cat_office": [("জয়েনিং", "joining_date"), ("স্যালারি", "salary"), ("মার্কেট টাইপ", "market_type"), ("বাইক", "motor_bike"), ("সাইকেল", "bicyle"), ("লাইসেন্স", "driving_license"), ("ঠিকানা", "present_address")]
+        "basic": [("নাম", "name"), ("ডিএমএস কোড", "dms_code"), ("ফোন", "phone_number"), ("পার্সোনাল নং", "personal_number"), ("পুল নং", "pool_number"), ("টাইপ", "type")],
+        "bank": [("ব্যাংক নাম", "bank_name"), ("অ্যাকাউন্ট", "bank_account"), ("ব্রাঞ্চ", "branch_name"), ("রাউটিং নং", "routing_number")],
+        "personal": [("বাবার নাম", "fathers_name"), ("মায়ের নাম", "mothers_name"), ("এনআইডি", "nid"), ("জন্মতারিখ", "dob"), ("রক্তের গ্রুপ", "blood_group"), ("ধর্ম", "religion"), ("হোম টাউন", "home_town")],
+        "pro": [("শিক্ষা", "last_education"), ("প্রতিষ্ঠান", "institution_name"), ("পূর্বের কোম্পানি", "previous_company_name"), ("পূর্বের স্যালারি", "previous_company_salary")],
+        "office": [("জয়েনিং", "joining_date"), ("স্যালারি", "salary"), ("মার্কেট টাইপ", "market_type"), ("বাইক", "motor_bike"), ("সাইকেল", "bicyle"), ("লাইসেন্স", "driving_license"), ("ঠিকানা", "present_address")]
     }
     
-    for label, field in fields_map.get(category, []):
-        builder.button(text=label, callback_data=f"ff_field_{field}_{ff_id}")
+    fields = fields_map.get(category_key, [])
+    for label, field_name in fields:
+        # ফরম্যাট: ff_field_{field}_{id} -> ff_field_name_1
+        builder.button(text=label, callback_data=f"ff_field_{field_name}_{ff_id}")
     
-    builder.button(text="🔙 ক্যাটাগরিতে ফিরুন", callback_data=f"ff_edit_{ff_id}")
-    builder.adjust(2)
+    builder.adjust(2) # ফিল্ড বাটন ২ কলামে
+    # ব্যাক বাটন আলাদা রো-তে
+    builder.row(InlineKeyboardButton(text="🔙 ক্যাটাগরিতে ফিরুন", callback_data=f"ff_edit_{ff_id}"))
     return builder.as_markup()
+
 
 
 # ==========================================
