@@ -8,8 +8,9 @@ class Retailer(Base):
 
     id = Column(Integer, primary_key=True)
     house_id = Column(Integer, ForeignKey('houses.id'), nullable=False)
-    
-    # আপনার দেওয়া নির্দিষ্ট কলামসমূহ
+    field_force_id = Column(Integer, ForeignKey('field_forces.id'), nullable=True)
+
+    # আপনার দেওয়া নির্দিষ্ট কলামসমূহ
     retailer_code = Column(String, unique=True, index=True) # RETAILER_CODE
     name = Column(String, nullable=False)          # RETAILER_NAME
     type = Column(String)                          # RETAILER_TYPE
@@ -39,3 +40,5 @@ class Retailer(Base):
 
     # রিলেশন: এই রিটেইলারের অধীনে কতগুলো লাইভ এক্টিভেশন আছে
     activations = relationship("LiveActivation", back_populates="retailer")
+
+    field_force = relationship("FieldForce", back_populates="retailers")

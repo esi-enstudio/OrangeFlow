@@ -64,8 +64,9 @@ def get_field_force_full_profile_text(m):
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>🆔 প্রাথমিক পরিচয় (Basic Info):</b>\n"
         f"🔹 নাম: {m.name}\n"
-        f"🔹 কোড: `{m.dms_code}`\n"
-        f"🔹 ফোন: {m.phone_number}\n"
+        f"🔹 ডিএমএস কোড: `{m.dms_code}`\n"
+        f"🔹 নিজের কোড: `{clean(m.assisted_retailer_code)}`\n"
+        f"🔹 আইটপ নাম্বার: {clean(m.itop_number)}\n"
         f"🔹 পার্সোনাল নং: {clean(m.personal_number)}\n"
         f"🔹 পুল নম্বর: {clean(m.pool_number)}\n"
         f"🔹 টাইপ: {clean(m.type)} | স্ট্যাটাস: {m.status}\n\n"
@@ -97,5 +98,50 @@ def get_field_force_full_profile_text(m):
         f"🔹 বাইক: {clean(m.motor_bike)} | সাইকেল: {clean(m.bicyle)}\n"
         f"🔹 লাইসেন্স: {clean(m.driving_license)}\n"
         f"🔹 ঠিকানা: {clean(m.present_address)}\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
+
+
+def get_retailer_full_profile_text(r):
+    """রিটেইলারের সকল ডাটা ফিল্ড ফোর্সের স্টাইলে সাজিয়ে দেওয়ার ফাংশন"""
+    def clean(val):
+        return str(val) if val and str(val).lower() != 'nan' else "N/A"
+    
+    # আরএসও (SR) এর নাম বের করা (যদি লিঙ্ক থাকে)
+    sr_name = r.field_force.name if r.field_force else "অ্যাসাইন করা নেই"
+
+    return (
+        f"🏪 **রিটেইলার বিস্তারিত প্রোফাইল**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>🆔 প্রাথমিক পরিচয় (Identity):</b>\n"
+        f"🔹 নাম: {r.name}\n"
+        f"🔹 কোড: `{r.retailer_code}`\n"
+        f"🔹 দায়িত্বপ্রাপ্ত SR: <b>{sr_name}</b>\n"
+        f"🔹 রিটেইলার টাইপ: {clean(r.type)}\n"
+        f"🔹 সচল (Enabled): {clean(r.enabled)}\n\n"
+        
+        f"<b>📞 যোগাযোগ ও মোবাইল (Contact):</b>\n"
+        f"🔹 ফোন নং: {clean(r.contact_no)}\n"
+        f"🔹 iTop Number: {clean(r.itop_number)}\n"
+        f"🔹 iTop SR No: {clean(r.itop_sr_number)}\n"
+        f"🔹 Tran Mobile: {clean(r.tran_mobile_no)}\n\n"
+        
+        f"<b>📍 ঠিকানা ও লোকেশন (Location):</b>\n"
+        f"🔹 থানা: {clean(r.thana)}\n"
+        f"🔹 জেলা: {clean(r.district)}\n"
+        f"🔹 রুট: {clean(r.route)}\n"
+        f"🔹 পূর্ণ ঠিকানা: {clean(r.address)}\n\n"
+        
+        f"<b>💼 বিজনেস ও ব্যক্তিগত (Business):</b>\n"
+        f"🔹 মালিকের নাম: {clean(r.owner_name)}\n"
+        f"🔹 এনআইডি (NID): {clean(r.nid)}\n"
+        f"🔹 জন্ম তারিখ: {clean(r.dob)}\n"
+        f"🔹 ক্যাটাগরি: {clean(r.category)}\n"
+        f"🔹 সার্ভিস পয়েন্ট: {clean(r.service_point)}\n"
+        f"🔹 সিম সেলার: {clean(r.sim_seller)}\n\n"
+        
+        f"<b>👷‍♂️ বিপি (BP) কানেকশন:</b>\n"
+        f"🔹 BP কোড: {clean(r.bp_code)}\n"
+        f"🔹 BP নম্বর: {clean(r.bp_number)}\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )

@@ -11,17 +11,14 @@ class FieldForce(Base):
     
     # ইউজার টেবিলের সাথে রিলেশন (বট ইউজার আইডি) ✅
     # এটি থাকলে আরএসও বা বিপি যখন নিজের জিএ চেক করবে, তখন বট তাকে চিনতে পারবে।
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=True)
-    
-    # নিজের রিটেইলার কোড চিহ্নিত করতে
-    retailer_id = Column(Integer, ForeignKey('retailers.id'), nullable=True) 
-    
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True)  
+    assisted_retailer_code = Column(String, nullable=True, index=True) # R026588  
     agency_id = Column(String, nullable=True) # এজেন্সির ডাটা থাকলে
     
     # বেসিক ইনফো
     dms_code = Column(String, unique=True, index=True) # DMS Code (R642686)
     name = Column(String, nullable=False)
-    phone_number = Column(String, unique=True, index=True)
+    itop_number = Column(String, unique=True, index=True)
     personal_number = Column(String, unique=True)
     pool_number = Column(String, unique=True)
     type = Column(String) # 'SR' or 'BP'
@@ -65,5 +62,8 @@ class FieldForce(Base):
 
     # রিলেশনশিপসমূহ
     house = relationship("House")
-    retailer = relationship("Retailer") 
+
+    # রিলেশন: এক আরএসও-র আন্ডারে অনেক রিটেইলার থাকতে পারে
+    retailers = relationship("Retailer", back_populates="field_force")
+
     user = relationship("User", back_populates="field_force_profile") # ইউজারের সাথে লিঙ্ক

@@ -6,15 +6,14 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import select, func
 
 from app.Models.field_force import FieldForce
-from app.Models.retailer import Retailer 
 from app.Models.user import User         
 from app.Services.db_service import async_session
 
 logger = logging.getLogger(__name__)
 
-# এক্সেল হেডারের তালিকা
+# ৩৮টি কলামের হেডার লিস্ট
 FF_COLUMNS = [
-    'DMS_CODE', 'AGENCY_ID', 'NAME', 'TYPE', 'PHONE_NUMBER', 'PERSONAL_NUMBER', 
+    'DMS_CODE', 'AGENCY_ID', 'NAME', 'TYPE', 'ITOP_NUMBER', 'PERSONAL_NUMBER', 
     'POOL_NUMBER', 'ASSISTED_RETAILER_CODE', 'SALARY', 'MARKET_TYPE', 
     'JOINING_DATE', 'RESIGNED_DATE', 'RELIGION', 'DOB', 'NID',
     'BANK_NAME', 'BANK_ACCOUNT', 'BRANCH_NAME', 'ROUTING_NUMBER', 'HOME_TOWN',
@@ -25,62 +24,59 @@ FF_COLUMNS = [
 ]
 
 async def generate_ff_sample(file_path):
+    """স্যাম্পল এক্সել ফাইল তৈরি"""
     df = pd.DataFrame(columns=FF_COLUMNS)
     df.to_excel(file_path, index=False)
     return file_path
 
 async def process_field_force_excel(file_path, house_id, progress_callback=None):
+    """এক্সেল ফাইল থেকে ডাটা নিয়ে ডাটাবেজে Upsert করবে"""
     try:
         # ১. ডাটা লোড
-        df = pd.read_excel(file_path, dtype=str).fillna("")
+        df = pd.read_excel(file_path, dtype=str)
         df.columns = [c.strip().upper().replace(" ", "_") for c in df.columns]
         
         total_rows = len(df)
         if total_rows == 0: return 0, "ফাইলটিতে কোনো ডাটা পাওয়া যায়নি।"
 
-        # ২. খালি ভ্যালুকে None (NULL) করার জন্য হেল্পার ফাংশন ✅
-        def clean_val(val, is_unique=False):
+        # ২. ক্লিন ফাংশন
+        def clean_val(val):
+            if pd.isna(val): 
+                return None
             v = str(val).strip()
-            if v == "" or v.lower() == "nan":
-                return None # খালি থাকলে ডাটাবেজে NULL যাবে
+            if v == "" or v.lower() in ["nan", "none", "null"]:
+                return None
             return v
 
         async with async_session() as session:
+            # এখানে count ইনিশিয়ালাইজ করা হয়েছে ✅
             count = 0
+            
             for index, row in df.iterrows():
                 dms_code_val = clean_val(row.get('DMS_CODE'))
                 name_val = clean_val(row.get('NAME'))
                 
                 if not dms_code_val or not name_val: continue
 
-                # ৩. রিটেইলার ও ইউজার আইডি বের করা
-                r_helper_code = clean_val(row.get('ASSISTED_RETAILER_CODE'))
-                target_retailer_id = None
-                if r_helper_code:
-                    r_res = await session.execute(
-                        select(Retailer.id).where(Retailer.retailer_code == r_helper_code, Retailer.house_id == house_id)
-                    )
-                    target_retailer_id = r_res.scalar_one_or_none()
-
-                # পার্সোনাল ফোন দিয়ে ইউজার ম্যাপিং
+                # ৩. User ID বের করা
                 p_phone_raw = clean_val(row.get('PERSONAL_NUMBER'))
                 target_user_id = None
                 if p_phone_raw:
-                    clean_phone = p_phone_raw if p_phone_raw.startswith('0') else f"0{p_phone_raw}"
-                    u_res = await session.execute(select(User.id).where(User.phone_number == clean_phone))
+                    clean_p_phone = p_phone_raw if p_phone_raw.startswith('0') else f"0{p_phone_raw}"
+                    u_res = await session.execute(select(User.id).where(User.phone_number == clean_p_phone))
                     target_user_id = u_res.scalar_one_or_none()
 
-                # ৪. ডাটা ম্যাপ করা (ইউনিক ফিল্ডগুলোতে clean_val নিশ্চিত করা হয়েছে) ✅
+                # ৪. ডাটাবেজ ম্যাপ
                 data_map = {
                     "house_id": house_id,
                     "user_id": target_user_id,
-                    "retailer_id": target_retailer_id,
                     "dms_code": dms_code_val,
+                    "assisted_retailer_code": clean_val(row.get('ASSISTED_RETAILER_CODE')),
                     "agency_id": clean_val(row.get('AGENCY_ID')),
                     "name": name_val,
-                    "phone_number": clean_val(row.get('PHONE_NUMBER')), # Unique
-                    "personal_number": p_phone_raw,                    # Unique
-                    "pool_number": clean_val(row.get('POOL_NUMBER')),   # Unique
+                    "itop_number": clean_val(row.get('ITOP_NUMBER')),
+                    "personal_number": p_phone_raw,
+                    "pool_number": clean_val(row.get('POOL_NUMBER')),
                     "type": (clean_val(row.get('TYPE')) or "SR").upper(),
                     "status": clean_val(row.get('STATUS')) or "Active",
                     "bank_name": clean_val(row.get('BANK_NAME')),
@@ -130,5 +126,5 @@ async def process_field_force_excel(file_path, house_id, progress_callback=None)
             return count, None
 
     except Exception as e:
-        logger.error(f"Excel Error: {str(e)}")
+        logger.error(f"❌ Excel Processing Error: {str(e)}")
         return 0, f"প্রসেসিং এরর: {str(e)}"

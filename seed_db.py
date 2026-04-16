@@ -12,10 +12,36 @@ async def seed_data():
 
         # --- ১. পারমিশন সিডিং ---
         permissions_list = [
-            "view_houses", "create_house", "renew_subscription", "view_users", 
-            "create_user", "edit_user", "delete_user", "manage_settings", 
-            "ga_live", "itopup_replace", "dms_access", "sim_status_check", 
-            "sim_issue", "sim_return", "report_access","view_ga_live","search_retailer","create_field_force","view_field_force","edit_field_force","delete_field_force","manage_field_force","manage_mela","manage_bts","upload_retailer_excel","manage_retailer","create_retailer","view_retailer","edit_retailer","delete_retailer"
+            "view_houses",
+            "create_house",
+            "renew_subscription",
+            "view_users", 
+            "create_user",
+            "edit_user",
+            "delete_user",
+            "manage_settings", 
+            "ga_live",
+            "itopup_replace",
+            "dms_access",
+            "sim_status_check", 
+            "sim_issue",
+            "sim_return",
+            "report_access",
+            "view_ga_live",
+            "search_retailer",
+            "create_field_force",
+            "view_field_force",
+            "edit_field_force",
+            "delete_field_force",
+            "manage_field_force",
+            "manage_mela",
+            "manage_bts",
+            "upload_retailer_excel",
+            "manage_retailers",
+            "create_retailers",
+            "view_retailers",
+            "edit_retailers",
+            "delete_retailers"
         ]
         
         db_perms = {}

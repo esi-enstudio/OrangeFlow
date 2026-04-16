@@ -3,140 +3,180 @@ from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select, func
+from sqlalchemy import select, func, not_
 from sqlalchemy.orm import selectinload
 
 from app.Models.user import User
 from app.Models.house import House
 from app.Models.live_activation import LiveActivation
+from app.Models.field_force import FieldForce
+from app.Models.retailer import Retailer
+from app.Models.ga_filter import GAProductFilter, GARetailerFilter
 from app.Services.db_service import async_session
+from app.Utils.helpers import bn_num
+from config.settings import SUPER_ADMIN_ID
 
-# লগিং কনফিগারেশন
 logger = logging.getLogger(__name__)
-
 router = Router()
 
-# ==========================================
-# ১. রিপোর্টস মেইন মেনু (Reply Keyboard Handler)
-# ==========================================
-
+# --- ১. রিপোর্ট মেনু ---
 @router.message(F.text == "📊 রিপোর্টস", flags={"permission": "report_access"})
-async def show_reports_menu(message: Message):
-    """ইউজারকে রিপোর্টের তালিকা ইনলাইন বাটন হিসেবে দেখাবে"""
+async def show_reports_menu(message: Message, permissions: list):
     builder = InlineKeyboardBuilder()
-    
-    # জিএ লাইভ রিপোর্টের জন্য বাটন (পারমিশন অনুযায়ী)
-    builder.button(text="📡 জিএ লাইভ", callback_data="ga_live_main")
-    
-    # ভবিষ্যতে আরও রিপোর্ট যোগ করার জন্য এখানে বাটন বাড়ানো যাবে
-    # builder.button(text="📈 সেলস রিপোর্ট", callback_data="sales_report")
-    
+    if "view_ga_live" in permissions:
+        builder.button(text="📡 জিএ লাইভ", callback_data="ga_live_main")
     builder.adjust(1)
-    
-    await message.answer(
-        "📊 **রিপোর্ট মডিউল**\nনিচের তালিকা থেকে কাঙ্খিত রিপোর্টটি নির্বাচন করুন:",
-        reply_markup=builder.as_markup(),
-        parse_mode="Markdown"
-    )
+    await message.answer("📊 **রিপোর্ট মডিউল**", reply_markup=builder.as_markup())
 
-
-# ==========================================
-# ২. জিএ লাইভ রিকোয়েস্ট হ্যান্ডেলার
-# ==========================================
-
+# --- ২. হাউজ চেক লজিক ---
 @router.callback_query(F.data == "ga_live_main", flags={"permission": "view_ga_live"})
 async def handle_ga_live_request(callback: CallbackQuery):
-    """চেক করবে ইউজারের কয়টি হাউজ আছে"""
+    user_tg_id = callback.from_user.id
+    is_super_admin = (int(user_tg_id) == int(SUPER_ADMIN_ID))
+
     async with async_session() as session:
-        # ইউজারের সাথে যুক্ত হাউজগুলো লোড করা
-        result = await session.execute(
-            select(User).options(selectinload(User.houses)).where(User.telegram_id == callback.from_user.id)
-        )
-        user = result.scalar_one_or_none()
+        target_houses = []
+        if is_super_admin:
+            target_houses = (await session.execute(select(House))).scalars().all()
+        else:
+            user = (await session.execute(
+                select(User).options(selectinload(User.houses)).where(User.telegram_id == user_tg_id)
+            )).scalar_one_or_none()
+            if user: target_houses = user.houses
 
-        if not user or not user.houses:
-            return await callback.message.answer("❌ আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।")
+        if not target_houses:
+            return await callback.message.answer("❌ কোনো হাউজ যুক্ত নেই।")
 
-        # ১টি হাউজ থাকলে সরাসরি সামারি দেখাবে
-        if len(user.houses) == 1:
-            house = user.houses[0]
-            await send_ga_summary(callback.message, house)
-            await callback.answer()
-            return
-
-        # একাধিক হাউজ থাকলে সিলেকশন বাটন দেখাবে
-        builder = InlineKeyboardBuilder()
-        for h in user.houses:
-            builder.button(text=f"🏢 {h.name}", callback_data=f"ga_hsel_{h.id}")
-        builder.adjust(2)
-
-        await callback.message.edit_text(
-            "আপনার একাধিক হাউজ রয়েছে। কোন হাউজের **জিএ লাইভ** দেখতে চান?",
-            reply_markup=builder.as_markup()
-        )
+        if len(target_houses) == 1:
+            await send_ga_detailed_report(callback.message, target_houses[0])
+        else:
+            builder = InlineKeyboardBuilder()
+            for h in target_houses: 
+                builder.button(text=f"🏢 {h.name}", callback_data=f"ga_hsel_{h.id}")
+            builder.adjust(2)
+            await callback.message.edit_text("কোন হাউজের রিপোর্ট দেখতে চান?", reply_markup=builder.as_markup())
     await callback.answer()
 
-
-# ==========================================
-# ৩. হাউজ সিলেকশন হ্যান্ডেলার
-# ==========================================
-
-@router.callback_query(F.data.startswith("ga_hsel_"), flags={"permission": "view_ga_live"})
-async def process_house_selection_ga(callback: CallbackQuery):
+@router.callback_query(F.data.startswith("ga_hsel_"))
+async def process_ga_house_select(callback: CallbackQuery):
     house_id = int(callback.data.split("_")[2])
-    
     async with async_session() as session:
         house = await session.get(House, house_id)
-        if not house:
-            return await callback.answer("❌ হাউজ পাওয়া যায়নি।", show_alert=True)
-        
-        await send_ga_summary(callback.message, house)
-    
+        if house: await send_ga_detailed_report(callback.message, house)
     await callback.answer()
 
-
-# ==========================================
-# ৪. সামারি জেনারেশন ফাংশন (Core Logic)
-# ==========================================
-
-async def send_ga_summary(message: Message, house: House):
-    """ডাটাবেজ থেকে ডাটা নিয়ে সুন্দর ফরম্যাটে রিপোর্ট পাঠাবে"""
+# --- ৩. মেইন রিপোর্ট জেনারেশন লজিক (সংশোধিত ও ক্লিন) ✅ ---
+async def send_ga_detailed_report(message: Message, house: House):
+    """ফিল্টার এবং গ্রুপিং অনুযায়ী বিস্তারিত জিএ রিপোর্ট তৈরি (চূড়ান্ত ফিক্স) ✅"""
     async with async_session() as session:
-        # ওই হাউজের আজকের মোট এক্টিভেশন সংখ্যা বের করা
-        count = await session.scalar(
-            select(func.count(LiveActivation.id)).where(LiveActivation.house_id == house.id)
-        )
+        # ১. ফিল্টার লোড করা
+        p_filters = (await session.execute(select(GAProductFilter.product_code).where(GAProductFilter.house_id == house.id))).scalars().all()
+        r_filters = (await session.execute(select(GARetailerFilter.keyword).where(GARetailerFilter.house_id == house.id))).scalars().all()
+        excluded_keywords = [k.upper() for k in r_filters]
 
-        # কিছু বাড়তি তথ্য (যেমন: শেষ ৩টি এক্টিভেশনের সময়) - ঐচ্ছিক
-        last_act_res = await session.execute(
-            select(LiveActivation.activation_time)
-            .where(LiveActivation.house_id == house.id)
-            .order_by(LiveActivation.id.desc())
-            .limit(1)
+        # ২. আজকের লাইভ এক্টিভেশন ডাটা ফেচ
+        act_query = select(LiveActivation).where(
+            LiveActivation.house_id == house.id,
+            not_(LiveActivation.product_code.in_(p_filters))
         )
-        last_time = last_act_res.scalar_one_or_none() or "ডাটা নেই"
+        activations = (await session.execute(act_query)).scalars().all()
+        house_total = len(activations)
+        
+        # রিটেইলার কোড অনুযায়ী কাউন্ট ম্যাপ (সিঙ্গেল কোট রিমুভ করে)
+        act_map = {}
+        for a in activations:
+            code = str(a.retailer_code).replace("'", "").strip().upper()
+            act_map[code] = act_map.get(code, 0) + 1
 
-        # রিপোর্ট টেক্সট তৈরি
-        report_text = (
-            f"📡 **জিএ লাইভ রিপোর্ট**\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🏢 হাউজ: **{house.name}**\n"
-            f"🔑 কোড: `{house.code}`\n\n"
-            f"✅ আজকের মোট এক্টিভেশন: **{count}** টি\n"
-            f"🕒 সর্বশেষ এক্টিভেশন: `{last_time}`\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 ডাটা অটো-সিঙ্ক হচ্ছে প্রতি ৫ মিনিট অন্তর।\n"
-            f"⏰ রিপোর্ট সময়: {datetime.now().strftime('%I:%M %p')}"
+        # ৩. ফিল্ড ফোর্স লোড করা (টাইপ নির্বিশেষে এক্টিভ মেম্বার)
+        ff_res = await session.execute(
+            select(FieldForce).options(selectinload(FieldForce.retailers))
+            .where(FieldForce.house_id == house.id, func.lower(FieldForce.status) == 'active')
         )
+        field_forces = ff_res.scalars().all()
 
-        # ইনলাইন বাটন (রিফ্রেশ করার জন্য)
+        # ক্যালকুলেশন শুরু
+        sr_final_data = []
+        bp_final_data = []
+        
+        for ff in field_forces:
+            # আরএসও-র নিজের কোড চিহ্নিত করা (Assisted Code থেকে)
+            own_code = str(ff.assisted_retailer_code).replace("'", "").strip().upper()
+            own_ga = act_map.get(own_code, 0)
+            
+            # আইটপ নাম্বারের শেষ ৩ সংখ্যা (উদা: 019...001 থেকে 001) ✅
+            itop_suffix = str(ff.itop_number)[-3:] if ff.itop_number else "N/A"
+
+            if ff.type in ['SR', 'RSO']:
+                market_ga = 0
+                for r in ff.retailers:
+                    r_code = str(r.retailer_code).replace("'", "").strip().upper()
+                    # শর্ত: যদি এটি আরএসও-র নিজের কোড না হয়, তবেই মার্কেটে কাউন্ট হবে
+                    if r_code != own_code:
+                        market_ga += act_map.get(r_code, 0)
+                
+                sr_final_data.append({
+                    "name": ff.name,
+                    "suffix": itop_suffix,
+                    "own": own_ga,
+                    "market": market_ga,
+                    "total": own_ga + market_ga
+                })
+            
+            elif ff.type == 'BP':
+                bp_final_data.append({
+                    "name": ff.name,
+                    "suffix": itop_suffix,
+                    "count": own_ga
+                })
+
+
+        # # --- ৪. রিপোর্ট টেক্সট ফরম্যাটিং (HTML) ---
+        report_time = datetime.now().strftime("%d %b’%y – %I:%M:%S %p")
+        text = f"📊 <b>GA Live Report</b> ({report_time})\n\n"
+
+        # SR / RSO Section
+        text += "🏠 <b>এস আর রিপোর্ট</b>\n"
+        text += "━━━━━━━━━━━━━\n"
+        sr_total_count = 0
+        if sr_final_data:
+            for i, sr in enumerate(sr_final_data, 1):
+                sr_total_count += sr['total']
+                # নাম (আইটপ নাম্বারের শেষ ৩ সংখ্যা)
+                text += f"{bn_num(i)} <b>{sr['name']}</b> ({sr['suffix']})\n"
+                # আপনার দেওয়া নতুন ফরম্যাট: ┗ নিজেরঃ ০টি স্টাইলে
+                text += f"┗ নিজেরঃ {bn_num(sr['own'])}টি\n"
+                text += f"┗ মার্কেটঃ {bn_num(sr['market'])}টি\n"
+                text += f"┗ মোটঃ <b>{bn_num(sr['total'])}টি</b>\n\n"
+        else:
+            text += "<i>কোনো এসআর ডাটা পাওয়া যায়নি</i>\n\n"
+        
+        text += f"🏁 <b>এসআর সর্বমোটঃ {bn_num(sr_total_count)}টি</b>\n\n"
+
+        # BP Section
+        text += "👷‍♂️ <b>বিপি রিপোর্ট</b>\n"
+        text += "━━━━━━━━━━━━━\n"
+        bp_total_count = 0
+        if bp_final_data:
+            for i, bp in enumerate(bp_final_data, 1):
+                bp_total_count += bp['count']
+                # বিপি নাম (আইটপ নাম্বারের শেষ ৩ সংখ্যা)
+                text += f"{bn_num(i)} <b>{bp['name']}</b> ({bp['suffix']}), {bn_num(bp['count'])}টি\n"
+        else:
+            text += "<i>কোনো বিপি ডাটা পাওয়া যায়নি</i>\n"
+            
+        text += f"\n🏁 <b>বিপি সর্বমোটঃ {bn_num(bp_total_count)}টি</b>\n"
+        
+        # হাউজের সর্বমোট
+        text += "━━━━━━━━━━━━━━━━━━━━\n"
+        text += f"🔥 <b>হাউজের সর্বমোট জিএঃ {bn_num(house_total)}টি</b>"
+
         builder = InlineKeyboardBuilder()
         builder.button(text="🔄 রিফ্রেশ", callback_data=f"ga_hsel_{house.id}")
         builder.button(text="🔙 ব্যাকে যান", callback_data="ga_live_main")
         builder.adjust(2)
 
-        # যদি মেসেজটি কলব্যাক থেকে আসে তবে এডিট করবে, নাহলে নতুন পাঠাবে
         try:
-            await message.edit_text(report_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         except:
-            await message.answer(report_text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")

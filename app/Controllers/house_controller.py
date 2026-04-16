@@ -9,7 +9,7 @@ from app.Models.house import House
 from app.Services.db_service import async_session
 from app.Views.keyboards.reply import get_house_mgmt_menu
 from app.Views.keyboards.inline import get_house_pagination_kb, get_house_action_kb, get_house_edit_fields_kb
-from config.settings import SUPER_ADMIN_ID
+from app.Views.keyboards.reply import get_admin_main_menu
 
 router = Router()
 
@@ -263,54 +263,72 @@ async def show_house_edit_menu(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("h_edit_"))
 async def process_house_field_selection(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
-    field_name = parts[2] # name, code, cluster, region, email, address, contact
-    house_id = int(parts[3])
+    # সব সময় শেষ অংশটি আইডি হিসেবে নেওয়া (নিরাপদ পদ্ধতি) ✅
+    house_id = int(parts[-1])
+    # মাঝখানের অংশগুলো জোড়া লাগিয়ে ফিল্ডের নাম বের করা (যেমন: dms_user)
+    field_name = "_".join(parts[2:-1])
     
-    # ফিল্ডের নামগুলো বাংলায় সাজানো (ইউজারের সুবিধার জন্য)
+    async with async_session() as session:
+        # ১. ডাটাবেজ থেকে বর্তমান তথ্য নেওয়া যাতে ইউজারকে দেখানো যায় ✅
+        h = await session.get(House, house_id)
+        if not h:
+            return await callback.answer("❌ হাউজ পাওয়া যায়নি।", show_alert=True)
+            
+        current_value = getattr(h, field_name)
+        display_value = str(current_value) if current_value and str(current_value).lower() != 'nan' else "দেওয়া নেই"
+
+    # ফিল্ডের সুন্দর নাম
     field_labels = {
         "name": "নাম", "code": "কোড", "cluster": "ক্লাস্টার",
-        "region": "রিজিয়ন", "email": "ইমেইল", "address": "ঠিকানা", "contact": "কন্টাক্ট"
+        "region": "রিজিয়ন", "email": "ইমেইল", "address": "ঠিকানা", 
+        "contact": "কন্টাক্ট", "dms_user": "DMS ইউজারনেম", 
+        "dms_pass": "DMS পাসওয়ার্ড", "dms_house_id": "DMS হাউজ আইডি"
     }
-    label = field_labels.get(field_name, "তথ্য")
+    label = field_labels.get(field_name, field_name.replace('_', ' ').capitalize())
     
     # স্টেট এ তথ্য জমা রাখা
     await state.update_data(edit_h_id=house_id, edit_h_field=field_name)
     
-    await callback.message.answer(f"📝 হাউজের নতুন **{label}** লিখে পাঠান:\n(বাতিল করতে চাইলে /start লিখুন)")
+    text = (
+        f"📝 **হাউজ তথ্য আপডেট**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📂 ফিল্ড: **{label}**\n"
+        f"📌 বর্তমান তথ্য: `{display_value}`\n\n"
+        f"👉 নতুন তথ্যটি লিখে পাঠান (অথবা বাতিল করতে /start দিন):"
+    )
+    
+    await callback.message.answer(text, parse_mode="Markdown")
     await state.set_state(HouseUpdateState.value)
     await callback.answer()
 
 # --- ৩. নতুন ভ্যালু সেভ করা এবং ডাটাবেজ আপডেট ---
 @router.message(HouseUpdateState.value)
-async def save_house_update_final(message: Message, state: FSMContext):
+async def save_house_update_final(message: Message, state: FSMContext, permissions: list):
     data = await state.get_data()
     house_id = data.get("edit_h_id")
     field = data.get("edit_h_field")
     new_val = message.text.strip()
     
     async with async_session() as session:
-        # ডাটাবেজ থেকে হাউজটি খুঁজে বের করা
         h = await session.get(House, house_id)
-        
         if not h:
             await state.clear()
             return await message.answer("❌ এরর: হাউজটি খুঁজে পাওয়া যায়নি।")
             
-        # ডাইনামিকভাবে কলাম আপডেট করা (সেট-এট্রিবিউট ব্যবহার করে)
+        # ডাইনামিকভাবে কলাম আপডেট করা
         setattr(h, field, new_val)
         await session.commit()
     
     await state.clear()
     
-    # আপডেট শেষে একটি কনফার্মেশন মেসেজ
     await message.answer(
-        f"✅ সফলভাবে হাউজের **{field.capitalize()}** আপডেট করা হয়েছে।\n"
+        f"✅ সফলভাবে হাউজের তথ্য আপডেট করা হয়েছে।\n"
         f"নতুন তথ্য: `{new_val}`",
         parse_mode="Markdown"
     )
     
-    # পুনরায় লিস্টটি দেখানোর জন্য (ঐচ্ছিক)
-    await show_house_list(message)
+    # কাজ শেষে পুনরায় হাউজ লিস্টটি দেখানো (ইউজার ফ্রেন্ডলি করার জন্য)
+    await message.answer("প্রধান মেনু:", reply_markup=get_admin_main_menu(permissions))
 
 
 

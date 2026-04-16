@@ -45,11 +45,12 @@ def get_field_force_main_kb(house_id, total_count, permissions: list, is_admin: 
 
 
 def get_ff_pagination_kb(members, page, total_pages, house_id):
-    """মেম্বার লিস্ট ও নেভিগেশন"""
     builder = InlineKeyboardBuilder()
     for m in members:
-        builder.button(text=f"👤 {m.name} ({m.dms_code})", callback_data=f"ff_view_{m.id}")
+        # এখানে itop_number দেখানো হচ্ছে ✅
+        builder.button(text=f"👤 {m.name} ({m.itop_number or 'N/A'})", callback_data=f"ff_view_{m.id}")
     builder.adjust(1)
+
 
     nav_btns = []
     if page > 1:
@@ -97,17 +98,22 @@ def get_ff_edit_categories_kb(ff_id):
     return builder.as_markup()
 
 def get_ff_fields_by_category_kb(category_key, ff_id):
-    """নির্দিষ্ট ক্যাটাগরির ফিল্ডসমূহ"""
     builder = InlineKeyboardBuilder()
-    
-    # কী অনুযায়ী ফিল্ড ম্যাপ
     fields_map = {
-        "basic": [("নাম", "name"), ("ডিএমএস কোড", "dms_code"), ("ফোন", "phone_number"), ("পার্সোনাল নং", "personal_number"), ("পুল নং", "pool_number"), ("টাইপ", "type")],
+        "basic": [
+            ("নাম", "name"), 
+            ("ডিএমএস কোড", "dms_code"), 
+            ("আইটপ নাম্বার", "itop_number"), # phone_number থেকে itop_number করা হলো ✅
+            ("পার্সোনাল নং", "personal_number"), 
+            ("রোল কোড", "assisted_retailer_code"), # এটিও যোগ করা হয়েছে
+            ("টাইপ", "type")
+        ],
         "bank": [("ব্যাংক নাম", "bank_name"), ("অ্যাকাউন্ট", "bank_account"), ("ব্রাঞ্চ", "branch_name"), ("রাউটিং নং", "routing_number")],
         "personal": [("বাবার নাম", "fathers_name"), ("মায়ের নাম", "mothers_name"), ("এনআইডি", "nid"), ("জন্মতারিখ", "dob"), ("রক্তের গ্রুপ", "blood_group"), ("ধর্ম", "religion"), ("হোম টাউন", "home_town")],
         "pro": [("শিক্ষা", "last_education"), ("প্রতিষ্ঠান", "institution_name"), ("পূর্বের কোম্পানি", "previous_company_name"), ("পূর্বের স্যালারি", "previous_company_salary")],
         "office": [("জয়েনিং", "joining_date"), ("স্যালারি", "salary"), ("মার্কেট টাইপ", "market_type"), ("বাইক", "motor_bike"), ("সাইকেল", "bicyle"), ("লাইসেন্স", "driving_license"), ("ঠিকানা", "present_address")]
     }
+
     
     fields = fields_map.get(category_key, [])
     for label, field_name in fields:

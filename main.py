@@ -19,7 +19,7 @@ from app.Controllers import (
     admin_controller, house_controller, user_controller,
     role_controller, automation_controller, sim_status_controller,
     sim_return_controller, sim_issue_controller, ga_live_controller,
-    field_force_controller, retailer_controller,
+    field_force_controller, retailer_controller, ga_filter_controller
 )
 
 # --- ২. লগিং কনফিগারেশন (সাইলেন্ট মুড) ---
@@ -120,7 +120,7 @@ async def main():
         automation_controller.router, sim_status_controller.router,
         sim_return_controller.router, sim_issue_controller.router,
         ga_live_controller.router, field_force_controller.router,
-        retailer_controller.router,
+        retailer_controller.router, ga_filter_controller.router
     )
 
     await bot.delete_webhook(drop_pending_updates=True)
