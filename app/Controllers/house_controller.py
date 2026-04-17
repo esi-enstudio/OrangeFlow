@@ -142,31 +142,19 @@ async def handle_pagination(callback: CallbackQuery):
 async def render_house_details(callback: CallbackQuery, house_id: int):
     async with async_session() as session:
         h = await session.get(House, house_id)
-        
         if not h:
             return await callback.answer("⚠️ হাউজটি পাওয়া যায়নি।", show_alert=True)
         
-        status = "Active ✅" if h.is_active else "Deactive ❌"
-        details = (
-            f"🏢 **হাউজ বিস্তারিত তথ্য** 🏢\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📛 নাম: {h.name}\n"
-            f"🔑 কোড: `{h.code}`\n"
-            f"🟢 স্ট্যাটাস: {status}\n"
-            f"🌍 ক্লাস্টার: {h.cluster}\n"
-            f"📍 রিজিয়ন: {h.region}\n"
-            f"📧 ইমেইল: {h.email or 'N/A'}\n"
-            f"🏠 ঠিকানা: {h.address or 'N/A'}\n"
-            f"📞 কন্টাক্ট: {h.contact or 'N/A'}\n"
-            f"📅 মেয়াদ শেষ: {h.subscription_date.strftime('%d-%m-%Y')}\n"
-            f"────────────────────"
-        )
+        # আমাদের নতুন হেল্পার মেথড কল করা ✅
+        from app.Utils.helpers import get_house_full_profile_text
+        details = get_house_full_profile_text(h)
         
         await callback.message.edit_text(
             details, 
             reply_markup=get_house_action_kb(h.id, h.is_active), 
-            parse_mode="Markdown"
+            parse_mode="HTML" # Markdown থেকে HTML এ পরিবর্তন ✅
         )
+
 
 # --- বিস্তারিত বাটন হ্যান্ডেলার (লিস্ট থেকে) ---
 @router.callback_query(F.data.startswith("view_h_"))
@@ -303,32 +291,55 @@ async def process_house_field_selection(callback: CallbackQuery, state: FSMConte
 
 # --- ৩. নতুন ভ্যালু সেভ করা এবং ডাটাবেজ আপডেট ---
 @router.message(HouseUpdateState.value)
-async def save_house_update_final(message: Message, state: FSMContext, permissions: list):
+async def save_house_update_final(message: Message, state: FSMContext):
+    # ১. স্টেট থেকে আইডি এবং ফিল্ডের নাম সংগ্রহ করা
     data = await state.get_data()
     house_id = data.get("edit_h_id")
-    field = data.get("edit_h_field")
+    field_name = data.get("edit_h_field")
     new_val = message.text.strip()
     
+    if not house_id or not field_name:
+        await state.clear()
+        return await message.answer("❌ সেশন এরর! অনুগ্রহ করে আবার চেষ্টা করুন।")
+
     async with async_session() as session:
+        # ২. ডাটাবেজ থেকে হাউজটি লোড করা
         h = await session.get(House, house_id)
+        
         if not h:
             await state.clear()
-            return await message.answer("❌ এরর: হাউজটি খুঁজে পাওয়া যায়নি।")
+            return await message.answer("❌ এরর: হাউজটি ডাটাবেজে খুঁজে পাওয়া যায়নি।")
             
-        # ডাইনামিকভাবে কলাম আপডেট করা
-        setattr(h, field, new_val)
+        # ৩. ডাইনামিকভাবে কলাম আপডেট করা এবং সেভ করা
+        setattr(h, field_name, new_val)
         await session.commit()
-    
+        
+        # ৪. ডাটাবেজ থেকে লেটেস্ট তথ্য রিফ্রেশ করা (যাতে সঠিক ডাটা রেন্ডার হয়)
+        await session.refresh(h)
+
+        # ৫. প্রোফাইল টেক্সট এবং কিবোর্ড জেনারেট করা
+        from app.Utils.helpers import get_house_full_profile_text
+        from app.Views.keyboards.inline import get_house_action_kb
+        
+        # হেল্পার মেথড কল করে HTML প্রোফাইল তৈরি
+        updated_profile = get_house_full_profile_text(h)
+        
+        # অ্যাকশন কিবোর্ড সংগ্রহ
+        reply_markup = get_house_action_kb(h.id, h.is_active)
+
+    # ৬. স্টেট ক্লিয়ার করা
     await state.clear()
     
-    await message.answer(
-        f"✅ সফলভাবে হাউজের তথ্য আপডেট করা হয়েছে।\n"
-        f"নতুন তথ্য: `{new_val}`",
-        parse_mode="Markdown"
-    )
+    # ৭. সাকসেস নোটিফিকেশন পাঠানো
+    display_field = field_name.replace('_', ' ').upper()
+    await message.answer(f"✅ সফলভাবে <b>{display_field}</b> আপডেট করা হয়েছে।", parse_mode="HTML")
     
-    # কাজ শেষে পুনরায় হাউজ লিস্টটি দেখানো (ইউজার ফ্রেন্ডলি করার জন্য)
-    await message.answer("প্রধান মেনু:", reply_markup=get_admin_main_menu(permissions))
+    # ৮. সরাসরি আপডেট হওয়া প্রোফাইলটি পাঠিয়ে দেওয়া ✅
+    await message.answer(
+        updated_profile, 
+        reply_markup=reply_markup, 
+        parse_mode="HTML" # প্রোফাইল এখন HTML মুডে দেখাবে
+    )
 
 
 

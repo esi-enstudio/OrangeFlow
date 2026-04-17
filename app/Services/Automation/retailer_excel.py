@@ -8,6 +8,7 @@ from sqlalchemy import select, func
 from app.Models.retailer import Retailer
 from app.Models.field_force import FieldForce # অটো-লিঙ্কিং এর জন্য জরুরি ✅
 from app.Services.db_service import async_session
+from app.Utils.helpers import bn_num
 
 logger = logging.getLogger(__name__)
 
@@ -102,12 +103,12 @@ async def process_retailer_excel(file_path, house_id, progress_callback=None):
                 if progress_callback and (count % 10 == 0 or count == total_rows):
                     percent = round((count / total_rows) * 100)
                     await progress_callback(
-                        f"⏳ **রিটেইলার আপলোড প্রগ্রেস:** {percent}%\n"
-                        f"📈 প্রসেস হয়েছে: `{count}` / `{total_rows}`"
+                        f"⏳ **রিটেইলার আপলোড প্রগ্রেস:** {bn_num(percent)}%\n"
+                        f"📈 প্রসেস হয়েছে: `{bn_num(count)}` / `{bn_num(total_rows)}`"
                     )
 
             await session.commit()
-            logger.info(f"✅ House {house_id}: {count} retailers processed and linked via iTop.")
+            logger.info(f"✅ House {house_id}: {bn_num(count)} retailers processed and linked via iTop.")
             return count, None
 
     except Exception as e:

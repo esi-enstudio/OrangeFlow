@@ -145,3 +145,40 @@ def get_retailer_full_profile_text(r):
         f"🔹 BP নম্বর: {clean(r.bp_number)}\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
+    
+    
+def get_house_full_profile_text(h):
+    """হাউজের সকল ডাটা রিটেইলার ও ফিল্ড ফোর্সের স্টাইলে সাজিয়ে দেওয়ার ফাংশন"""
+    def clean(val):
+        return str(val) if val and str(val).lower() != 'nan' else "N/A"
+    
+    # স্ট্যাটাস এবং সাবস্ক্রিপশন ডেট ফরম্যাটিং
+    status = "Active ✅" if h.is_active else "Deactive ❌"
+    sub_date = h.subscription_date.strftime('%d-%m-%Y') if h.subscription_date else "N/A"
+
+    return (
+        f"🏢 <b>হাউজ বিস্তারিত প্রোফাইল</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>🆔 প্রাথমিক পরিচয় (Identity):</b>\n"
+        f"🔹 নাম: {h.name}\n"
+        f"🔹 কোড: <code>{h.code}</code>\n"
+        f"🔹 স্ট্যাটাস: {status}\n\n"
+        
+        f"<b>📍 অবস্থান ও ক্লাস্টার (Geography):</b>\n"
+        f"🔹 ক্লাস্টার: {clean(h.cluster)}\n"
+        f"🔹 রিজিয়ন: {clean(h.region)}\n\n"
+        
+        f"<b>📞 যোগাযোগ ও ঠিকানা (Contact):</b>\n"
+        f"🔹 কন্টাক্ট নং: {clean(h.contact)}\n"
+        f"🔹 ইমেইল: {clean(h.email)}\n"
+        f"🔹 ঠিকানা: {clean(h.address)}\n\n"
+        
+        f"<b>🔐 ডিএমএস ক্রেডেনশিয়াল (DMS):</b>\n"
+        f"🔹 ইউজারনেম: <code>{clean(h.dms_user)}</code>\n"
+        f"🔹 পাসওয়ার্ড: <code>{clean(h.dms_pass)}</code>\n"
+        f"🔹 হাউজ আইডি: <code>{clean(h.dms_house_id)}</code>\n\n"
+        
+        f"<b>📅 সাবস্ক্রিপশন (Subscription):</b>\n"
+        f"🔹 মেয়াদ শেষ: <b>{sub_date}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━"
+    )
