@@ -55,6 +55,34 @@ def get_admin_main_menu(permissions: list):
 
 
 
+
+
+
+
+
+def get_reports_mgmt_menu(permissions: list):
+    """রিপোর্টস সাব-মেনু (Reply Keyboard)"""
+    buttons = []
+    row = []
+    
+    # জিএ লাইভ বাটনটি এখানে আসবে
+    if "view_ga_live" in permissions:
+        row.append(KeyboardButton(text="📡 জিএ লাইভ"))
+    
+    # ভবিষ্যতে আরও রিপোর্ট (যেমন সেলস রিপোর্ট) এখানে যোগ করা যাবে
+    
+    if row:
+        buttons.append(row)
+
+    # সব সময় প্রধান মেনুতে ফেরার বাটন থাকবে
+    buttons.append([KeyboardButton(text="🔙 প্রধান মেনু")])
+    
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+
+
+
+
 def get_report_menu(permissions: list):
     """রিপোর্টস সাব-মেনু"""
     buttons = []
