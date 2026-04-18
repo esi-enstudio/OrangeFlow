@@ -101,6 +101,11 @@ async def handle_ga_back_inline(callback: CallbackQuery):
 
 async def send_ga_detailed_report(message: Message, house: House, edit: bool = False):
     async with async_session() as session:
+        # ১. আজকের তারিখ নির্ধারণ (DMS এক্সেল ফরম্যাট অনুযায়ী: 18-Apr-2026) ✅
+        from datetime import date
+        today_str = date.today().strftime("%d-%b-%Y") 
+        # দ্রষ্টব্য: যদি আপনার ডাটাবেজে তারিখ '18-04-2026' ফরম্যাটে থাকে তবে "%d-%m-%Y" দিবেন
+        
         # ১. ফিল্টার ও ডাটা লোড
         p_filters = (await session.execute(select(GAProductFilter.product_code).where(GAProductFilter.house_id == house.id))).scalars().all()
         r_filters = (await session.execute(select(GARetailerFilter.keyword).where(GARetailerFilter.house_id == house.id))).scalars().all()
@@ -108,6 +113,7 @@ async def send_ga_detailed_report(message: Message, house: House, edit: bool = F
 
         act_query = select(LiveActivation).where(
             LiveActivation.house_id == house.id,
+            LiveActivation.activation_date == today_str,
             not_(LiveActivation.product_code.in_(p_filters))
         )
         activations = (await session.execute(act_query)).scalars().all()
@@ -128,6 +134,14 @@ async def send_ga_detailed_report(message: Message, house: House, edit: bool = F
         sr_zero_list = []   # যাদের জিএ শূন্য ✅
         bp_final_data = []
         
+        # --- এ হাউজের সকল বিপি (BP) কোডগুলো সংগ্রহ করা (অটো-ফিল্টারের জন্য) ---
+        bp_codes_res = await session.execute(
+            select(FieldForce.assisted_retailer_code)
+            .where(FieldForce.house_id == house.id, FieldForce.type == 'BP')
+        )
+        # সকল বিপির কোড একটি সেটে রাখা হলো যাতে দ্রুত সার্চ করা যায়
+        all_bp_codes = {str(c[0]).replace("'", "").strip().upper() for c in bp_codes_res.all() if c[0]}
+        
         for ff in field_forces:
             own_code = str(ff.assisted_retailer_code).replace("'", "").strip().upper() if ff.assisted_retailer_code else ""
             own_ga = act_map.get(own_code, 0)
@@ -139,8 +153,19 @@ async def send_ga_detailed_report(message: Message, house: House, edit: bool = F
                 if ff.retailers:
                     for r in ff.retailers:
                         r_code = str(r.retailer_code).replace("'", "").strip().upper()
-                        is_excluded = any(kw in r_code or kw in str(r.name).upper() for kw in excluded_keywords)
-                        if r_code != own_code and not is_excluded:
+                        
+                        # --- স্মার্ট মার্কেট ফিল্টার লজিক ✅ ---
+                        # ক. চেক ১: এটি কি আরএসও-র নিজের কোড?
+                        is_own_code = (r_code == own_code)
+                        
+                        # খ. চেক ২: এটি কি কোনো বিপি (BP) এর ব্যক্তিগত কোড? (অটো-ম্যাচিং)
+                        is_bp_code = (r_code in all_bp_codes)
+                        
+                        # গ. চেক ৩: এটি কি এডমিনের দেওয়া কাস্টম ফিল্টার কিওয়ার্ড/কোড এর সাথে মিলে?
+                        is_manual_excluded = any(kw in r_code or kw in str(r.name).upper() for kw in excluded_keywords)
+                        
+                        # কোনো শর্ত মিললে সেটি মার্কেটে কাউন্ট হবে না
+                        if not is_own_code and not is_bp_code and not is_manual_excluded:
                             market_ga += act_map.get(r_code, 0)
                 
                 total_ga = own_ga + market_ga
