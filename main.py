@@ -99,9 +99,9 @@ async def main():
     # ১. ডাটাবেজ ইনিশিয়ালাইজেশন
     try:
         await init_db()
-        print("✅ ডাটাবেজ কানেকশন সফল।")
+        print("✅ DB Connected Successfully!")
     except Exception as e:
-        print(f"❌ ডাটাবেজ কানেকশন এরর: {e}")
+        print(f"❌ DB Connection Error: {e}")
         return
 
     # ২. ব্রাউজার ইঞ্জিন স্টার্ট

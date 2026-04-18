@@ -133,6 +133,7 @@ async def send_ga_detailed_report(message: Message, house: House, edit: bool = F
         sr_active_list = [] # যাদের জিএ আছে
         sr_zero_list = []   # যাদের জিএ শূন্য ✅
         bp_final_data = []
+        cc_final_data = []
         
         # --- এ হাউজের সকল বিপি (BP) কোডগুলো সংগ্রহ করা (অটো-ফিল্টারের জন্য) ---
         bp_codes_res = await session.execute(
@@ -177,9 +178,21 @@ async def send_ga_detailed_report(message: Message, house: House, edit: bool = F
                 else:
                     sr_zero_list.append(sr_item)
             
+            # বিপি লজিক
             elif ff_type == 'BP':
                 pool_suffix = str(ff.pool_number)[-3:] if ff.pool_number else "N/A"
                 bp_final_data.append({"name": ff.name, "suffix": pool_suffix, "count": own_ga})
+            
+            # সিসি (CC) লজিক
+            elif ff_type == 'CC':
+                # সিসিদের জন্য পুল নাম্বারের শেষ ৩ ডিজিট সংগ্রহ
+                pool_suffix = str(ff.pool_number)[-3:] if ff.pool_number else "N/A"
+                
+                cc_final_data.append({
+                    "name": ff.name,
+                    "suffix": pool_suffix, # এখানে আইটপ এর বদলে পুল সাফিক্স বসবে ✅
+                    "count": own_ga
+                })
                  
 
         # ২. রিপোর্ট টেক্সট ফরম্যাটিং
@@ -225,6 +238,17 @@ async def send_ga_detailed_report(message: Message, house: House, edit: bool = F
         else:
             text += "<i>কোনো বিপি ডাটা পাওয়া যায়নি</i>\n"
         text += f"\n🏁 <b>বিপি সর্বমোটঃ {bn_num(bp_total_count)}টি</b>\n"
+
+
+        # সিসি (CC) রিপোর্ট ✅
+        if cc_final_data:
+            text += "🎧 <b>সিসি রিপোর্ট</b>\n━━━━━━━━━━━━━\n"
+            cc_grand = 0
+            for i, cc in enumerate(cc_final_data, 1):
+                cc_grand += cc['count']
+                text += f"{bn_num(i)} <b>{cc['name']}</b> ({cc['suffix']}), {bn_num(cc['count'])}টি\n"
+            text += f"🏁 <b>সিসি সর্বমোটঃ {bn_num(cc_grand)}টি</b>\n\n"
+            
         
         text += "━━━━━━━━━━━━━━━━━━━━\n"
         text += f"🔥 <b>হাউজের সর্বমোট জিএঃ {bn_num(house_total)}টি</b>\n"

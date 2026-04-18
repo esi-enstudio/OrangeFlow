@@ -20,7 +20,6 @@ async def seed_data():
             "edit_user",
             "delete_user",
             "manage_settings", 
-            "ga_live",
             "itopup_replace",
             "dms_access",
             "sim_status_check", 
