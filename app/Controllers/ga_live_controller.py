@@ -40,7 +40,6 @@ async def handle_ga_live_initial(message: Message):
 # ==========================================
 
 async def handle_ga_logic_core(message: Message, user_tg_id: int, edit: bool = False):
-    from config.settings import SUPER_ADMIN_ID
     is_super_admin = (int(user_tg_id) == int(SUPER_ADMIN_ID))
 
     async with async_session() as session:
@@ -59,7 +58,7 @@ async def handle_ga_logic_core(message: Message, user_tg_id: int, edit: bool = F
 
         # ১টি হাউজ থাকলে সরাসরি রিপোর্ট
         if len(target_houses) == 1:
-            await send_ga_detailed_report(message, target_houses[0], edit=edit)
+            await send_ga_detailed_report(message, target_houses[0], user_id=user_tg_id, edit=edit)
             return
 
         # একাধিক হাউজ থাকলে সিলেকশন বাটন
@@ -86,7 +85,7 @@ async def process_ga_house_select(callback: CallbackQuery):
         house = await session.get(House, house_id)
         if house: 
             # রিপোর্ট দেখানোর সময় edit=True দেওয়া হয়েছে যাতে মেসেজ এডিট হয় ✅
-            await send_ga_detailed_report(callback.message, house, edit=True)
+            await send_ga_detailed_report(callback.message, house, user_id=callback.from_user.id, edit=True)
     await callback.answer()
 
 @router.callback_query(F.data == "ga_live_main")
@@ -99,7 +98,7 @@ async def handle_ga_back_inline(callback: CallbackQuery):
 # ৪. মেইন রিপোর্ট জেনারেশন ও রেন্ডারিং ✅
 # ==========================================
 
-async def send_ga_detailed_report(message: Message, house: House, edit: bool = False):
+async def send_ga_detailed_report(message: Message, house: House, user_id: int, edit: bool = False):
     async with async_session() as session:
         # ১. আজকের তারিখ নির্ধারণ (DMS এক্সেল ফরম্যাট অনুযায়ী: 18-Apr-2026) ✅
         from datetime import date
@@ -259,8 +258,22 @@ async def send_ga_detailed_report(message: Message, house: House, edit: bool = F
         # ৩. বাটন (রিফ্রেশ এবং ব্যাক)
         builder = InlineKeyboardBuilder()
         builder.button(text="🔄 রিফ্রেশ করুন", callback_data=f"ga_hsel_{house.id}")
-        builder.button(text="🔙 হাউজ লিস্ট", callback_data="ga_live_main")
+
+        is_super_admin = (int(user_id) == int(SUPER_ADMIN_ID))
+
+        # ডাটাবেজ থেকে ইউজারের হাউজ সংখ্যা পুনরায় নিশ্চিত করা
+        user_res = await session.execute(
+            select(User).options(selectinload(User.houses)).where(User.telegram_id == user_id)
+        )
+        user_obj = user_res.scalar_one_or_none()
+        house_count = len(user_obj.houses) if user_obj and user_obj.houses else 0
+
+        # এখন কন্ডিশনটি সবার জন্য কাজ করবে ✅
+        if is_super_admin or house_count > 1:
+            builder.button(text="🔙 হাউজ লিস্ট", callback_data="ga_live_main")
+        
         builder.adjust(2)
+
 
         # ৪. স্মার্ট আপডেট ✅
         if edit:

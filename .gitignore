@@ -72,4 +72,4 @@ dist/
 browser_profiles/
 sessions/
 temp_downloads/
-*.xlsx
+#*.xlsx

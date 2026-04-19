@@ -135,14 +135,14 @@ async def main():
         
         background_tasks.extend([webhook_task, scheduler_task])
 
-        logger.info("🤖 বট এবং মাস্টার অটোমেশন সিস্টেম সচল হয়েছে...")
+        logger.info("🤖 Bot and master automation system activated")
 
         await dp.start_polling(bot)
 
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
-        logger.info("👋 শাটডাউন শুরু হচ্ছে...")
+        logger.info("👋 Shutdown initiated...")
 
         # ১. সব ব্যাকগ্রাউন্ড টাস্ক (Webhook, Scheduler) বন্ধ করা
         for task in background_tasks:
@@ -155,7 +155,7 @@ async def main():
         # ৩. বট সেশন বন্ধ করা
         await bot.session.close()
         
-        logger.info("✅ সবকিছু সফলভাবে বন্ধ করা হয়েছে।")
+        logger.info("✅ All tasks closed successfully.")
 
 if __name__ == "__main__":
     try:
