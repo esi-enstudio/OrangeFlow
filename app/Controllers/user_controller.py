@@ -303,7 +303,7 @@ async def edit_user_houses_start(callback: CallbackQuery, state: FSMContext):
         builder = InlineKeyboardBuilder()
         for h in all_h:
             status = "✅" if h.id in curr_ids else "🔘"
-            builder.button(text=f"{status} {h.name}", callback_data=f"toggle_u_h_edit_{h.id}")
+            builder.button(text=f"{status} {h.display_name}", callback_data=f"toggle_u_h_edit_{h.id}")
         builder.button(text="💾 আপডেট সেভ করুন", callback_data="save_u_houses_edit")
         builder.button(text="🔙 ফিরে যান", callback_data=f"manage_u_{user_id}")
         builder.adjust(2)

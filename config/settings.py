@@ -7,6 +7,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SUPER_ADMIN_ID = int(os.getenv("SUPER_ADMIN_ID"))
 NGROK_AUTH_TOKEN = os.getenv("NGROK_AUTH_TOKEN")
+WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", 8080)) # ডিফল্ট ৮০৮০ রাখা হয়েছে
 
 # excel_wa_sync.py হেডলেস মুড কন্ট্রোল (স্ট্রিং থেকে বুলিয়ান এ রূপান্তর)
 HEADLESS = os.getenv("HEADLESS_MODE", "True").lower() == "true"

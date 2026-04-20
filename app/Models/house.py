@@ -34,3 +34,9 @@ class House(Base):
     )
     
     retailers = relationship("Retailer", back_populates="house")
+
+    @property
+    def display_name(self):
+        """হাউজের নাম (কোডের শেষ ৫ সংখ্যা) রিটার্ন করবে"""
+        code_suffix = self.code[-5:] if self.code and len(self.code) >= 5 else (self.code or "")
+        return f"{self.name} ({code_suffix})"

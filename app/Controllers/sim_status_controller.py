@@ -13,7 +13,8 @@ from app.Models.house import House
 from app.Services.db_service import async_session
 from app.Services.Automation.Tasks.sim_status import run_sim_status_check
 from app.Utils.validators import validate_and_expand_serials
-from app.Utils.helpers import get_dms_credentials, bn_num 
+from app.Utils.helpers import get_dms_credentials, bn_num
+from config.settings import SUPER_ADMIN_ID
 
 router = Router()
 
@@ -24,33 +25,46 @@ class SIMStatusForm(StatesGroup):
 # --- ১. ইনলাইন বাটন থেকে টাস্ক শুরু (হাউজ সিলেকশন লজিকসহ) ---
 @router.callback_query(F.data == "run_sim_status", flags={"permission": "sim_status_check"})
 async def trigger_sim_status(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user_tg_id = callback.from_user.id
+    is_super_admin = (int(user_tg_id) == int(SUPER_ADMIN_ID))
+
     async with async_session() as session:
-        # ইউজারের সাথে যুক্ত সব হাউজ লোড করা
-        res = await session.execute(
-            select(DBUser).options(selectinload(DBUser.houses)).where(DBUser.telegram_id == callback.from_user.id)
-        )
-        user = res.scalar_one_or_none()
-        
-        if not user or not user.houses:
-            return await callback.answer("❌ আপনার সাথে কোনো হাউজ যুক্ত নেই।", show_alert=True)
+        target_houses = []
+
+        if is_super_admin:
+            # সুপার এডমিন হলে ডাটাবেজের সব হাউজ লোড করবে ✅
+            res = await session.execute(select(House))
+            target_houses = res.scalars().all()
+        else:
+            # সাধারণ ইউজার হলে শুধু তার সাথে লিঙ্ক করা হাউজগুলো নিবে
+            res = await session.execute(
+                select(DBUser).options(selectinload(DBUser.houses)).where(DBUser.telegram_id == user_tg_id)
+            )
+            user = res.scalar_one_or_none()
+            if user:
+                target_houses = user.houses
+
+        if not target_houses:
+            return await callback.answer("❌ আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।", show_alert=True)
 
         # যদি হাউজ মাত্র ১টি হয় - সরাসরি সিরিয়াল চাবে
-        if len(user.houses) == 1:
-            house = user.houses[0]
+        if len(target_houses) == 1:
+            house = target_houses[0]
             await state.update_data(selected_house_id=house.id)
             await callback.message.answer(
-                f"🏢 হাউজ: **{house.name}**\n\nসিম সিরিয়াল অথবা রেঞ্জ (Start-End) লিখে পাঠান:",
+                f"🏢 হাউজ: **{house.display_name}**\n\nসিম সিরিয়াল অথবা রেঞ্জ (Start-End) লিখে পাঠান:",
                 parse_mode="Markdown"
             )
             await state.set_state(SIMStatusForm.serials)
         
-        # যদি একাধিক হাউজ থাকে - সিলেকশন মেনু দেখাবে
+        # যদি একাধিক হাউজ থাকে - সিলেকশন মেনু দেখাবে ✅
         else:
             builder = InlineKeyboardBuilder()
-            for h in user.houses:
-                builder.button(text=f"🏢 {h.name}", callback_data=f"task_h_sel_{h.id}")
+            for h in target_houses:
+                builder.button(text=f"🏢 {h.display_name}", callback_data=f"task_h_sel_{h.id}")
             builder.adjust(1)
-            await callback.message.answer("আপনি কোন হাউজের ডাটা চেক করতে চান?", reply_markup=builder.as_markup())
+            await callback.message.answer("কোন হাউজের সিম স্ট্যাটাস চেক করতে চান?", reply_markup=builder.as_markup())
     
     await callback.answer()
 

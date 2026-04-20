@@ -8,6 +8,7 @@ from config import settings
 # লগিং কনফিগারেশন
 logging.getLogger("pyngrok").setLevel(logging.ERROR)
 
+# লাইভ বটের জন্য এটি লাগবে, কিন্তু ডেভ বটের জন্য এটি খালি রাখা ভালো বা আলাদা ডোমেইন দিতে হবে
 STATIC_DOMAIN = "unselfconscious-drusilla-subcommissarial.ngrok-free.dev"
 
 async def handle_otp_webhook(request):
@@ -20,6 +21,7 @@ async def handle_otp_webhook(request):
         h_id = data.get("house_code") or data.get("house_name") or "UNKNOWN"
 
         if otp_code and len(str(otp_code)) == 6:
+
             # এখানে house_name সহ আপডেট করা হচ্ছে
             otp_manager.update_otp(str(otp_code), h_id)
             
@@ -27,7 +29,7 @@ async def handle_otp_webhook(request):
             print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             print(f"📥 [Webhook] ওটিপি রিসিভ হয়েছে!")
             print(f"🏢 হাউজ: {h_id}")
-            print(f"🔑 কোড: {otp_code}")
+            print(f"🔑 ওটিপি: {otp_code}")
             print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             
             return web.Response(text=f"OTP for {h_id} Received", status=200)
@@ -39,6 +41,9 @@ async def handle_otp_webhook(request):
 
 async def start_webhook_server(port=8080):
     """সার্ভার এবং এনগ্রোক স্টার্ট করার প্রফেশনাল লজিক"""
+
+    # ১. পোর্ট নির্ধারণ (প্যারামিটার না থাকলে সেটিংস থেকে নিবে) ✅
+    current_port = port if port else settings.WEBHOOK_PORT
     
     # এনগ্রোক ক্লিনআপ
     ngrok.kill() 
@@ -49,9 +54,17 @@ async def start_webhook_server(port=8080):
 
     try:
         conf.get_default().auth_token = settings.NGROK_AUTH_TOKEN
-        # টানেল কানেক্ট করা
-        ngrok.connect(port, domain=STATIC_DOMAIN)
-        print(f"✅ [System] Ngrok Tunnel Active: {STATIC_DOMAIN}")
+
+        # ডাইনামিক এনগ্রোক কানেকশন ✅
+        # ডেভ বটের জন্য যদি স্ট্যাটিক ডোমেইন কাজ না করে (একই সাথে ২ বার ব্যবহার করা যায় না), 
+        # তবে সেটি র্যান্ডম ইউআরএল তৈরি করবে।
+        try:
+            ngrok.connect(current_port, domain=STATIC_DOMAIN)
+            print(f"✅ [System] Ngrok Tunnel Active: {STATIC_DOMAIN}")
+        except Exception:
+            # যদি স্ট্যাটিক ডোমেইন বিজি থাকে (যেমন লাইভ বটে চলছে), তবে র্যান্ডম ইউআরএল নিবে
+            public_url = ngrok.connect(current_port)
+            print(f"✅ [System] Ngrok Random Tunnel Active: {public_url.public_url}")
 
     except Exception as e:
         if "already bound" not in str(e):

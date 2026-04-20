@@ -54,7 +54,7 @@ async def handle_gaf_house_logic(message: Message, state: FSMContext, user_tg_id
             # একাধিক হাউজ থাকলে সিলেকশন বাটন
             builder = InlineKeyboardBuilder()
             for h in target_houses:
-                builder.button(text=f"🏢 {h.name}", callback_data=f"gaf_hsel_{h.id}")
+                builder.button(text=f"🏢 {h.display_name}", callback_data=f"gaf_hsel_{h.id}")
             builder.adjust(1)
             
             text = "⚙️ **জিএ ফিল্টার সেটিংস**\nহাউজ নির্বাচন করুন:"

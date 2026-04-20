@@ -356,5 +356,5 @@ async def renew_sub(message: Message, command: CommandObject):
             cur = h.subscription_date or datetime.now()
             h.subscription_date = max(cur, datetime.now()) + timedelta(days=int(args[1]))
             await session.commit()
-            await message.answer(f"✅ {h.name} এর মেয়াদ বাড়ানো হয়েছে।")
+            await message.answer(f"✅ {h.display_name} এর মেয়াদ বাড়ানো হয়েছে।")
     except: await message.answer("ভুল ফরম্যাট!")

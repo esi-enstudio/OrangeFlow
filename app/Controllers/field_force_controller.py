@@ -305,7 +305,7 @@ async def handle_excel_upload(message: Message, state: FSMContext):
     
     async with async_session() as session:
         h = await session.get(House, house_id)
-        h_name = h.name if h else "হাউজ"
+        h_name = h.display_name if h else "হাউজ"
 
     file_path = f"temp_ff_{message.from_user.id}.xlsx"
     wait_msg = await message.answer(f"⏳ **{h_name}** প্রসেসিং শুরু হচ্ছে...")

@@ -1,10 +1,13 @@
 import asyncio
+import os
 import re
 import logging
 from datetime import datetime
 from app.Core.session_manager import session_manager
 from app.Services.Automation.dms_scraper import get_smart_search_results
 from app.Utils.helpers import bn_num
+from app.Core.automation_engine import engine
+from app.Core.session_manager import SESSION_DIR
 
 # লগিং সেটআপ
 logger = logging.getLogger("app.Services.Automation.Tasks")
@@ -18,6 +21,7 @@ async def run_sim_issue_status(serials: list, credentials: dict):
     house_name = credentials.get('house_name', 'N/A')
     
     logger.info(f"🚀 [{house_name}] সিম ইস্যু এনালাইসিস শুরু হচ্ছে...")
+
     # ১. সচল পেজ সংগ্রহ
     page, context = await session_manager.get_valid_page(credentials)
     
@@ -49,10 +53,23 @@ async def run_sim_issue_status(serials: list, credentials: dict):
 async def run_finalize_issue(serials: list, retailer_code: str, credentials: dict):
     """ধাপ ২: চূড়ান্তভাবে ডিএমএস-এ সিম ইস্যু সম্পন্ন করা"""
     house_name = credentials.get('house_name', 'N/A')
+    h_code = credentials['code']
+    session_path = os.path.join(SESSION_DIR, f"session_{h_code}.json")
     
     logger.info(f"📤 [{house_name}] রিটেইলার `{retailer_code}` এর জন্য ফাইনাল ইস্যু শুরু...")
-    # ১. নতুন পেজ সংগ্রহ
-    page, context = await session_manager.get_valid_page(credentials)
+
+    # ১. সরাসরি ব্রাউজার এবং সেশন ফাইল থেকে কন্টেক্সট তৈরি ✅
+    # এটি স্মার্ট সার্চ পেজে না গিয়ে সরাসরি জেসন থেকে কুকি লোড করবে, যা সময় বাঁচাবে।
+    browser = await engine.get_browser()
+
+    # সেশন ফাইল থেকে কন্টেক্সট খোলা (কোনো চেক ছাড়াই)
+    if os.path.exists(session_path):
+        context = await browser.new_context(storage_state=session_path)
+    else:
+        context = await browser.new_context()
+        
+    page = await context.new_page()
+
     
     try:
         # ২. ইস্যু পেজে যাওয়া (networkidle পরিহার করা হয়েছে)
@@ -90,7 +107,7 @@ async def run_finalize_issue(serials: list, retailer_code: str, credentials: dic
             logger.error(f"❌ রিটেইলার `{retailer_code}` পাওয়া যায়নি।")
             return f"❌ এরর: রিটেইলার কোড `{retailer_code}` ড্রপডাউনে পাওয়া যায়নি।"
 
-        await asyncio.sleep(1.5) 
+        await asyncio.sleep(1) 
 
         # ৫. সিম লিস্ট ইনপুট ও অ্যাড বাটনে ক্লিক (force=True ব্যবহার করা হয়েছে নিরাপদ ইনপুটের জন্য)
         await page.fill("#SimList", "\n".join(serials), force=True)
@@ -125,8 +142,7 @@ async def run_finalize_issue(serials: list, retailer_code: str, credentials: dic
         return f"❌ ইস্যু সাবমিশন এরর: {str(e)}"
     
     finally:
-        if page:
-            await page.close()
+        if page: await page.close()
         if context:
             await context.close() # ✅ এটি এখন অবশ্যই করতে হবে
         logger.info(f"🚪 [{house_name}] টাস্ক ক্লিনআপ সম্পন্ন।")
@@ -134,59 +150,70 @@ async def run_finalize_issue(serials: list, retailer_code: str, credentials: dic
 
 
 
-def process_issue_summary(all_data, target_house):
-    """সিম ইস্যু এনালাইসিস সামারি জেনারেটর (আইকন আপডেট সহ)"""
+def process_issue_summary(all_data, house_info):
+    """
+    সিম ইস্যু এনালাইসিস সামারি জেনারেটর (স্মার্ট হাউজ ভ্যালিডেশন সহ) ✅
+    house_info: এটি একটি ডিকশনারি হবে যাতে 'code' এবং 'house_name' আছে।
+    """
     active_map = {}
     issued_map = {}
     warehouse_list = []
     ready_serials_only = []
     errors = []
 
+    # ১. টার্গেট হাউজ কোড এবং নাম প্রসেসিং (বড় হাতের এবং স্পেস মুক্ত)
+    target_code = str(house_info.get('code', '')).strip().upper()
+    target_name = str(house_info.get('house_name', '')).strip().upper()
+
     for d in all_data:
         sim = d.get("SIM No", "").strip()
-        house = d.get("Distributor", "N/A")
+        # ডিএমএস থেকে পাওয়া ডিস্ট্রিবিউটর ডাটা (উদা: RYZBRB01-M/S Patwary Telecom)
+        d_info = str(d.get("Distributor", "N/A")).strip().upper()
+        
         retailer = d.get("Retailer", "")
         act_date = d.get("Activation Date", "")
         msisdn = d.get("MSISDN", d.get("Mobile No", "N/A"))
 
-        # ১. হাউজ ভ্যালিডেশন
-        if target_house and target_house not in house:
-            errors.append(f"❌ `{sim}`: এটি {house} হাউসের সিম।")
+        # ১. হাউজ ভ্যালিডেশন (কোড বা নাম দিয়ে)
+        if target_code not in d_info and target_name not in d_info:
+            errors.append(f"❌ `{sim}`: এটি {d.get('Distributor')} হাউসের সিম।")
             continue
 
-        # ২. এক্টিভ সিম (🔴) - যা ইস্যু করা যাবে না
+        # ২. এক্টিভ সিম চেক
         if act_date:
             if act_date not in active_map: active_map[act_date] = []
             clean_msisdn = f"0{msisdn}" if len(msisdn) == 10 else msisdn
             active_map[act_date].append(f"🔴 {sim}\n📱 {clean_msisdn} (এক্টিভ)")
 
-        # ৩. ইতিমধ্যে ইস্যু করা সিম (🟡)
+        # ৩. ইতিমধ্যে ইস্যু করা সিম
         elif retailer and retailer.strip() and "Select" not in retailer:
             if retailer not in issued_map: issued_map[retailer] = []
             issued_map[retailer].append(f"🟡 {sim}")
-
-        # ৪. রেডি সিম (⚪) - যা নতুন করে ইস্যু করা যাবে
+        
+        # ৪. রেডি সিম
         else:
             warehouse_list.append(f"⚪ {sim}")
             ready_serials_only.append(sim)
 
-    # --- মেসেজ ফরম্যাটিং ---
-    final_output = ["📝 **সিম ইস্যু এনালাইসিস রিপোর্ট:**\n"]
 
-    # এক্টিভ সিম সেকশন
+
+    # --- ৬. রিপোর্ট টেক্সট ফরম্যাটিং (HTML স্টাইল) ---
+    final_output = ["📝 সিম ইস্যু এনালাইসিস রিপোর্ট:\n"]
+
+    # এক্টিভ সেকশন
     if active_map:
         for date, lines in active_map.items():
             final_output.append("\n".join(lines))
             final_output.append(f"📅 {date}\n")
 
-    # ইতিমধ্যে ইস্যু করা সিম সেকশন
+    # ইস্যু করা সেকশন
     if issued_map:
         if len(final_output) > 1: final_output.append("----------------------------")
         for ret, sims in issued_map.items():
             final_output.append("\n".join(sims))
             final_output.append(f"••••••••••••••••••••••\n🏪 {ret} (ইতিমধ্যে ইস্যু করা)\n")
 
-    # নতুন ইস্যুযোগ্য সিম সেকশন
+    # রেডি সিম সেকশন
     if warehouse_list:
         final_output.append("\n".join(warehouse_list))
         final_output.append(f"✅ এই {bn_num(len(warehouse_list))}টি সিম ইস্যু করা সম্ভব।\n")

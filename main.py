@@ -7,6 +7,7 @@ from config.settings import BOT_TOKEN
 from app.Services.db_service import init_db
 from app.Middleware.access_control import ACLMiddleware
 from app.Core.webhook_server import start_webhook_server
+from config import settings
 
 # --- ১. নতুন কোর অটোমেশন ইঞ্জিন ও সেশন ম্যানেজার ইম্পোর্ট ---
 from app.Core.automation_engine import engine
@@ -128,7 +129,7 @@ async def main():
     background_tasks = []
     try:
         # ওটিপি রিসিভার সার্ভার চালু রাখা
-        webhook_task = asyncio.create_task(start_webhook_server(port=8080))
+        webhook_task = asyncio.create_task(start_webhook_server(settings.WEBHOOK_PORT))
         
         # মাস্টার সিডিউলার চালু করা (এটি সিঙ্ক এবং সেশন দুটোই দেখবে) ✅
         scheduler_task = asyncio.create_task(master_automation_scheduler())

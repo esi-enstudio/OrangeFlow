@@ -22,23 +22,38 @@ class SIMReturnForm(StatesGroup):
 @router.callback_query(F.data == "run_sim_return", flags={"permission": "sim_return"})
 async def trigger_sim_return(callback: CallbackQuery, state: FSMContext):
     await state.clear()
+    user_tg_id = callback.from_user.id
     
-    async with async_session() as session:
-        # ইউজারের সাথে যুক্ত হাউজগুলো লোড করা
-        result = await session.execute(
-            select(User).options(selectinload(User.houses)).where(User.telegram_id == callback.from_user.id)
-        )
-        user = result.scalar_one_or_none()
+    # সুপার এডমিন চেক ✅
+    from config.settings import SUPER_ADMIN_ID
+    is_super_admin = (int(user_tg_id) == int(SUPER_ADMIN_ID))
 
-        if not user or not user.houses:
-            return await callback.answer("❌ আপনার সাথে কোনো হাউজ যুক্ত নেই।", show_alert=True)
+    async with async_session() as session:
+        target_houses = []
+
+        if is_super_admin:
+            # সুপার এডমিন হলে ডাটাবেজে থাকা সব হাউজ লোড করবে ✅
+            res = await session.execute(select(House))
+            target_houses = res.scalars().all()
+        else:
+            # সাধারণ ইউজার হলে শুধু তার প্রোফাইলের হাউজগুলো নিবে
+            result = await session.execute(
+                select(User).options(selectinload(User.houses)).where(User.telegram_id == user_tg_id)
+            )
+            user = result.scalar_one_or_none()
+            if user:
+                target_houses = user.houses
+
+        if not target_houses:
+            return await callback.answer("❌ আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।", show_alert=True)
 
         # কেস ১: যদি শুধুমাত্র ১টি হাউজ থাকে
-        if len(user.houses) == 1:
-            house = user.houses[0]
+        if len(target_houses) == 1:
+            house = target_houses[0]
             await state.update_data(selected_house_id=house.id)
+            # এখানেও h.display_name ব্যবহার করা হয়েছে ✅
             await callback.message.answer(
-                f"🏢 হাউজ: **{house.name}**\n📥 সিম রিটার্ন করার জন্য সিরিয়াল অথবা রেঞ্জ লিখে পাঠান:",
+                f"🏢 হাউজ: **{house.display_name}**\n📥 সিম রিটার্ন করার জন্য সিরিয়াল অথবা রেঞ্জ লিখে পাঠান:",
                 parse_mode="Markdown"
             )
             await state.set_state(SIMReturnForm.serials)
@@ -46,12 +61,13 @@ async def trigger_sim_return(callback: CallbackQuery, state: FSMContext):
         # কেস ২: যদি একাধিক হাউজ থাকে
         else:
             builder = InlineKeyboardBuilder()
-            for h in user.houses:
-                builder.button(text=f"🏢 {h.name}", callback_data=f"return_hsel_{h.id}")
+            for h in target_houses:
+                # গ্লোবাল নেম ফরম্যাট: Name (Suffix) ✅
+                builder.button(text=f"🏢 {h.display_name}", callback_data=f"return_hsel_{h.id}")
             builder.adjust(1)
             
             await callback.message.answer(
-                "আপনার একাধিক হাউজ রয়েছে। কোন হাউজে সিম রিটার্ন করতে চান?", 
+                "কোন হাউজে সিম রিটার্ন করতে চান? হাউজ নির্বাচন করুন:", 
                 reply_markup=builder.as_markup()
             )
             await state.set_state(SIMReturnForm.house_selection)

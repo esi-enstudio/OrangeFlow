@@ -9,7 +9,7 @@ def get_field_force_house_selection_kb(houses):
     """ফিল্ড ফোর্সের জন্য হাউস নির্বাচন"""
     builder = InlineKeyboardBuilder()
     for h in houses:
-        builder.button(text=f"🏢 {h.name}", callback_data=f"ff_hsel_{h.id}")
+        builder.button(text=f"🏢 {h.display_name}", callback_data=f"ff_hsel_{h.id}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -160,7 +160,7 @@ def get_house_pagination_kb(houses, page, total_pages):
     builder = InlineKeyboardBuilder()
     for h in houses:
         status = "✅" if h.is_active else "❌"
-        builder.button(text=f"{h.name} ({h.code}) {status}", callback_data=f"view_h_{h.id}")
+        builder.button(text=f"{h.display_name} ({h.code}) {status}", callback_data=f"view_h_{h.id}")
     
     nav_btns = []
     if page > 1: nav_btns.append(InlineKeyboardButton(text="⬅️", callback_data=f"hlist_page_{page-1}"))
