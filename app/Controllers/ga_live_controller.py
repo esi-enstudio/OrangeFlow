@@ -196,64 +196,62 @@ async def send_ga_detailed_report(message: Message, house: House, user_id: int, 
 
         # ২. রিপোর্ট টেক্সট ফরম্যাটিং
         report_time = datetime.now().strftime("%d %b’%y – %I:%M:%S %p")
+
+        # রিপোর্ট হেডার
         text = f"🏢 হাউজ: <b>{house.name}</b>\n"
         text += (
             f"📊 <b>GA Live Report</b>\n"
             f"{report_time}\n\n"
         )
-        
-        # SR / RSO Section
-        text += "🏠 <b>এস আর রিপোর্ট</b>\n"
-        text += "━━━━━━━━━━━\n"
-        sr_total_count = 0
-        if sr_active_list:
-            for i, sr in enumerate(sr_active_list, 1):
-                sr_total_count += sr['total']
-                text += f"{bn_num(i)} <b>{sr['name']}</b> ({sr['suffix']})\n"
-                text += f"┗ নিজেরঃ {bn_num(sr['own'])}টি\n"
-                text += f"┗ মার্কেটঃ {bn_num(sr['market'])}টি\n"
-                text += f"┗ মোটঃ <b>{bn_num(sr['total'])}টি</b>\n\n"
-        else:
-            text += "<i>আজকে কারো জিএ হয়নি</i>\n\n"
-        text += f"🏁 <b>এসআর সর্বমোটঃ {bn_num(sr_total_count)}টি</b>\n\n"
-        
-        # SR Zero GA Section (যাদের আজকে কাজ হয়নি) ✅
+
+        # ১. এস আর রিপোর্ট (যদি এসআর থাকে তবেই দেখাবে) ✅
+        if sr_active_list or sr_zero_list:
+            text += "🏠 <b>এস আর রিপোর্ট</b>\n━━━━━━━━━━━\n"
+            sr_grand = 0
+            if sr_active_list:
+                for i, sr in enumerate(sr_active_list, 1):
+                    sr_grand += sr['total']
+                    text += f"{bn_num(i)} <b>{sr['name']}</b> ({sr['suffix']})\n"
+                    text += f"┗ নিজেরঃ {bn_num(sr['own'])}টি\n"
+                    text += f"┗ মার্কেটঃ {bn_num(sr['market'])}টি\n"
+                    text += f"┗ মোটঃ <b>{bn_num(sr['total'])}টি</b>\n\n"
+            
+            text += f"🏁 <b>এসআর সর্বমোটঃ {bn_num(sr_grand)}টি</b>\n"
+
+            # SR Zero GA Section (যাদের আজকে কাজ হয়নি) ✅
         if sr_zero_list:
             text += "--------------------------\n"
             for i, sr in enumerate(sr_zero_list, 1):
                 text += f"{bn_num(i)} {sr['name']} ({sr['suffix']})\n"
             text += "আজকে এদের কোন জিএ হয়নি।\n\n"
+            
 
-
-
-        # BP Section
-        text += "👷‍♂️ <b>বিপি রিপোর্ট</b>\n"
-        text += "━━━━━━━━━━━━━\n"
-        bp_total_count = 0
+        # ২. বিপি রিপোর্ট (যদি বিপি থাকে তবেই দেখাবে) ✅
         if bp_final_data:
+            text += "👷‍♂️ <b>বিপি রিপোর্ট</b>\n━━━━━━━━━━━━━\n"
+            bp_grand = 0
             for i, bp in enumerate(bp_final_data, 1):
-                bp_total_count += bp['count']
+                bp_grand += bp['count']
                 text += f"{bn_num(i)} <b>{bp['name']}</b> ({bp['suffix']}), {bn_num(bp['count'])}টি\n"
-        else:
-            text += "<i>কোনো বিপি ডাটা পাওয়া যায়নি</i>\n"
-        text += f"\n🏁 <b>বিপি সর্বমোটঃ {bn_num(bp_total_count)}টি</b>\n"
+            
+            text += f"\n🏁 <b>বিপি সর্বমোটঃ {bn_num(bp_grand)}টি</b>\n\n"
 
 
-        # সিসি (CC) রিপোর্ট ✅
+        # ৩. সিসি রিপোর্ট (যদি সিসি থাকে তবেই দেখাবে) ✅
         if cc_final_data:
             text += "🎧 <b>সিসি রিপোর্ট</b>\n━━━━━━━━━━━━━\n"
             cc_grand = 0
             for i, cc in enumerate(cc_final_data, 1):
                 cc_grand += cc['count']
                 text += f"{bn_num(i)} <b>{cc['name']}</b> ({cc['suffix']}), {bn_num(cc['count'])}টি\n"
-            text += f"🏁 <b>সিসি সর্বমোটঃ {bn_num(cc_grand)}টি</b>\n\n"
             
-        
+            text += f"🏁 <b>সিসি সর্বমোটঃ {bn_num(cc_grand)}টি</b>\n\n"
+
+        # ৪. গ্লোবাল ফুটার (হাউজের সর্বমোট)
         text += "━━━━━━━━━━━━━━━━━━━━\n"
         text += f"🔥 <b>হাউজের সর্বমোট জিএঃ {bn_num(house_total)}টি</b>\n"
-        
-        # ৫ মিনিট পর পর আপডেটের তথ্য নোট হিসেবে যোগ করা হলো
-        text += "🕒 <i>জিএ রিপোর্টটি প্রতি ৫ মিনিট পর পর স্বয়ংক্রিয়ভাবে আপডেট হয়।</i>"
+        text += "🕒 জিএ রিপোর্টটি প্রতি ৫ মিনিট পর পর স্বয়ংক্রিয়ভাবে আপডেট হয়।"
+
 
         # ৩. বাটন (রিফ্রেশ এবং ব্যাক)
         builder = InlineKeyboardBuilder()
