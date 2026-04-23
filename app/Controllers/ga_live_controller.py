@@ -65,7 +65,7 @@ async def handle_ga_logic_core(message: Message, user_tg_id: int, edit: bool = F
         builder = InlineKeyboardBuilder()
         for h in target_houses: 
             builder.button(text=f"🏢 {h.display_name}", callback_data=f"ga_hsel_{h.id}")
-        builder.adjust(2)
+        builder.adjust(1)
         
         text = "কোন হাউজের **জিএ লাইভ রিপোর্ট** দেখতে চান?"
         

@@ -9,7 +9,7 @@ from app.Middleware.access_control import ACLMiddleware
 from app.Core.webhook_server import start_webhook_server
 from config import settings
 
-# --- ১. নতুন কোর অটোমেশন ইঞ্জিন ও সেশন ম্যানেজার ইম্পোর্ট ---
+# --- কোর ইঞ্জিন ইম্পোর্ট ---
 from app.Core.automation_engine import engine
 
 # সিঙ্ক এবং রিসেট ফাংশনগুলো ইম্পোর্ট
@@ -30,20 +30,29 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-# লাইব্রেরিগুলোর অপ্রয়োজনীয় লগ বন্ধ রাখা (শুধুমাত্র সিরিয়াস এরর দেখাবে)
+# অপ্রয়োজনীয় লগ বন্ধ রাখা
 logging.getLogger("aiogram").setLevel(logging.ERROR)
 logging.getLogger("pyngrok").setLevel(logging.ERROR)
 logging.getLogger("aiohttp").setLevel(logging.ERROR)
-logging.getLogger("asyncio").setLevel(logging.CRITICAL)
 logging.getLogger("playwright").setLevel(logging.ERROR)
 logging.getLogger("aiogram.dispatcher").setLevel(logging.CRITICAL)
 
-# নিজস্ব মডিউলগুলোর জন্য INFO লেভেল নিশ্চিত করা
-logging.getLogger("app.Core.login_manager").setLevel(logging.INFO)
-logging.getLogger("app.Core.session_manager").setLevel(logging.INFO)
-logging.getLogger("app.Core.automation_engine").setLevel(logging.INFO)
-
 logger = logging.getLogger(__name__)
+
+# # লাইব্রেরিগুলোর অপ্রয়োজনীয় লগ বন্ধ রাখা (শুধুমাত্র সিরিয়াস এরর দেখাবে)
+# logging.getLogger("aiogram").setLevel(logging.ERROR)
+# logging.getLogger("pyngrok").setLevel(logging.ERROR)
+# logging.getLogger("aiohttp").setLevel(logging.ERROR)
+# logging.getLogger("asyncio").setLevel(logging.CRITICAL)
+# logging.getLogger("playwright").setLevel(logging.ERROR)
+# logging.getLogger("aiogram.dispatcher").setLevel(logging.CRITICAL)
+
+# # নিজস্ব মডিউলগুলোর জন্য INFO লেভেল নিশ্চিত করা
+# logging.getLogger("app.Core.login_manager").setLevel(logging.INFO)
+# logging.getLogger("app.Core.session_manager").setLevel(logging.INFO)
+# logging.getLogger("app.Core.automation_engine").setLevel(logging.INFO)
+
+# logger = logging.getLogger(__name__)
 
 # ==========================================
 # MASTER AUTOMATION SCHEDULER
@@ -51,10 +60,16 @@ logger = logging.getLogger(__name__)
 
 async def master_automation_scheduler():
     """
-    একমাত্র মাস্টার লুপ যা সেশন পাহারাদার এবং জিএ সিঙ্ক উভয়ই হ্যান্ডেল করবে।
-    সকাল ৮টা থেকে রাত ১২টা পর্যন্ত জিএ সিঙ্ক চলবে। 
-    রাত ১২টায় রিসেট হবে।
+    ১. রাত ১২টায় ডাটাবেজ রিসেট করবে।
+    ২. সকাল ৮টা থেকে রাত ১২টা পর্যন্ত ৫ মিনিট অন্তর GA সিঙ্ক করবে।
     """
+
+    # ডেভ বটে যদি আপনি অটো-সিঙ্ক না চান, তবে .env তে এটি কন্ট্রোল করতে পারেন
+    if getattr(settings, "DISABLE_SCHEDULER", False):
+        logger.info("ℹ️ [Scheduler] Disabled by configuration.")
+        return
+    
+
     logger.info("🚀 Master Automation Scheduler শুরু হয়েছে...")
     
     # সিস্টেম স্ট্যাবল হওয়ার জন্য কিছুক্ষণ অপেক্ষা
@@ -111,6 +126,8 @@ async def main():
     # ৩. বট এবং ডিসপ্যাচার সেটআপ
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
+
+    # মিডলওয়্যার রেজিস্ট্রেশন (Message & Callback)
     dp.message.middleware(ACLMiddleware())
     dp.callback_query.middleware(ACLMiddleware())
 
@@ -124,11 +141,12 @@ async def main():
         retailer_controller.router, ga_filter_controller.router
     )
 
+    # পেন্ডিং মেসেজ স্কিপ করা
     await bot.delete_webhook(drop_pending_updates=True)
 
     background_tasks = []
     try:
-        # ওটিপি রিসিভার সার্ভার চালু রাখা
+        # ওটিপি রিসিভার সার্ভার (এটি সেটিংস থেকে মাস্টার/স্লেভ রোল নিবে)
         webhook_task = asyncio.create_task(start_webhook_server(settings.WEBHOOK_PORT))
         
         # মাস্টার সিডিউলার চালু করা (এটি সিঙ্ক এবং সেশন দুটোই দেখবে) ✅
@@ -136,27 +154,33 @@ async def main():
         
         background_tasks.extend([webhook_task, scheduler_task])
 
-        logger.info("🤖 Bot and master automation system activated")
+        logger.info(f"🤖 Bot is Live! Mode: {'Master (Ngrok ON)' if settings.START_NGROK else 'Slave (Local Only)'}")
 
+        # টেলিগ্রাম পোলিং শুরু
         await dp.start_polling(bot)
 
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
+    except Exception as e:
+        logger.error(f"❌ Critical runtime error: {e}")
     finally:
-        logger.info("👋 Shutdown initiated...")
+        logger.info("👋 Shutdown initiated. Cleaning up...")
+
+
 
         # ১. সব ব্যাকগ্রাউন্ড টাস্ক (Webhook, Scheduler) বন্ধ করা
         for task in background_tasks:
             if not task.done():
                 task.cancel()
+        
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
 
-        # ২. আলাদাভাবে ইঞ্জিন বন্ধ করা ✅
+        # প্লে-রাইট ইঞ্জিন এবং বট সেশন বন্ধ করা
         await engine.stop()
-
-        # ৩. বট সেশন বন্ধ করা
         await bot.session.close()
         
-        logger.info("✅ All tasks closed successfully.")
+        logger.info("✅ System closed successfully.")
 
 if __name__ == "__main__":
     try:

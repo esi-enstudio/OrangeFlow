@@ -44,7 +44,7 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
             return error 
 
         # ৪. স্ক্র্যাপ করা ডাটা এনালাইসিস করে সামারি তৈরি
-        summary_msg, grouped_return_data = process_return_summary(scanned_data, house_name)
+        summary_msg, grouped_return_data = process_return_summary(scanned_data, credentials)
         
         # ইউজারকে টেলিগ্রামে এনালাইসিস রিপোর্ট পাঠানো
         await bot.send_message(chat_id, summary_msg, parse_mode="Markdown")
@@ -153,58 +153,82 @@ async def run_sim_return_task(serials: list, credentials: dict, bot, chat_id):
         logger.info(f"🚪 [{house_name}] টাস্ক ক্লিনআপ সম্পন্ন।")
 
 
-def process_return_summary(scanned_data, target_house):
-    """রিটার্নযোগ্য সিম গ্রুপিং এবং রিপোর্ট জেনারেশন"""
-    active_map = {}   
-    issued_map = {}   
-    warehouse_list = []
-    errors = []
-    grouped_return_data = {} 
+def process_return_summary(scanned_data, credentials):
+    """
+    হাউজ কোড (RYZBRB01) ব্যবহার করে নিখুঁত ভ্যালিডেশন এবং 
+    রিটার্নযোগ্য সিম গ্রুপিং লজিক।
+    """
+    import re
+    
+    active_map = {}   # এক্টিভ সিম (তারিখ অনুযায়ী)
+    issued_map = {}   # ইস্যু করা সিম (রিটেইলার অনুযায়ী)
+    warehouse_list = [] # ওয়্যারহাউসে থাকা সিম
+    errors = []       # অন্য হাউজের সিম
+    grouped_return_data = {} # অটোমেশন সাবমিশনের জন্য ডাটা
+
+    # ১. ডাটাবেজ থেকে আমাদের হাউজ কোড এবং নাম সংগ্রহ ✅
+    target_code = str(credentials.get('code', '')).strip().upper() 
+    target_name = credentials.get('house_name', 'N/A')
 
     for d in scanned_data:
         sim = d.get("SIM No", "").strip()
-        house = d.get("Distributor", "N/A")
+        # ডিএমএস থেকে পাওয়া হাউজ তথ্য (উদা: RYZBRB01-M/S Patwary Telecom)
+        dms_house_info = str(d.get("Distributor", "")).strip().upper() 
         retailer = d.get("Retailer", "")
         act_date = d.get("Activation Date", "")
         msisdn = d.get("MSISDN", d.get("Mobile No", "N/A"))
 
-        # হাউজ ভ্যালিডেশন
-        if target_house and target_house not in house:
-            errors.append(f"❌ `{sim}`: এটি {house} হাউসের সিম।")
+        # ২. শক্তিশালী হাউজ ভ্যালিডেশন (কোড দিয়ে চেক) ✅
+        # এটি চেক করবে RYZBRB01 শব্দটি ডিএমএস এর ডিস্ট্রিবিউটর নামের ভেতর আছে কিনা
+        if target_code not in dms_house_info:
+            errors.append(f"❌ `{sim}`: এটি {d.get('Distributor')} হাউসের সিম।")
             continue
 
+        # ৩. সিমের অবস্থা অনুযায়ী গ্রুপিং
         if act_date:
+            # এক্টিভ সিম (রিটার্ন সম্ভব নয়)
             if act_date not in active_map: active_map[act_date] = []
             clean_msisdn = f"0{msisdn}" if len(msisdn) == 10 else msisdn
             active_map[act_date].append(f"🔴 {sim}\n📱 {clean_msisdn} (এক্টিভ)")
 
         elif retailer and retailer.strip() and "Select" not in retailer:
+            # ইস্যু করা সিম (এগুলো রিটার্ন হবে)
             if retailer not in issued_map: issued_map[retailer] = []
             issued_map[retailer].append(f"🟡 {sim}")
             
-            # রিটেইলার কোড (R12345) আলাদা করা
+            # রিটেইলার কোড (উদা: R123456) আলাদা করে ডিকশনারিতে রাখা
             match = re.search(r'R\d+', retailer)
             code = match.group(0) if match else retailer
             if code not in grouped_return_data: grouped_return_data[code] = []
             grouped_return_data[code].append(sim)
         else:
+            # ইস্যু হয়নি এমন সিম (ওয়্যারহাউস)
             warehouse_list.append(f"⚪ {sim} (ওয়্যারহাউসে আছে)")
 
-    final_output = ["📝 **সিম রিটার্ন এনালাইসিস রিপোর্ট:**\n"]
+    # ৪. রিপোর্ট টেক্সট ফরম্যাটিং ✅
+    final_output = [
+        f"📝 **সিম রিটার্ন এনালাইসিস রিপোর্ট**",
+        f"🏢 হাউজ: **{target_name}** (`{target_code}`)\n"
+    ]
+
+    # এক্টিভ সেকশন
     if active_map:
         for date, lines in active_map.items():
             final_output.append("\n".join(lines))
             final_output.append(f"📅 {date}\n")
 
+    # ইস্যু করা সেকশন (যাদের রিটার্ন প্রসেস শুরু হবে)
     if issued_map:
-        if len(final_output) > 1: final_output.append("----------------------------")
+        if len(final_output) > 2: final_output.append("----------------------------")
         for ret, sims in issued_map.items():
             final_output.append("\n".join(sims))
             final_output.append(f"••••••••••••••••••••••\n🏪 {ret} (রিটার্ন করা হবে)\n")
 
+    # ওয়্যারহাউস সেকশন
     if warehouse_list:
         final_output.append("\n".join(warehouse_list))
 
+    # এরর সেকশন (অন্য হাউজের ডাটা)
     if errors:
         final_output.append("\n" + "\n".join(errors))
 
