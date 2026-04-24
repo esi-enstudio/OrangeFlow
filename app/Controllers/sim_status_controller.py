@@ -126,9 +126,9 @@ async def process_sim_serials(message: Message, state: FSMContext):
         # ৬. রেজাল্ট পাঠানো (টেলিগ্রাম লিমিট হ্যান্ডেল করে)
         if len(automation_result) > 4000:
             for i in range(0, len(automation_result), 4000):
-                await message.answer(automation_result[i:i+4000])
+                await message.answer(automation_result[i:i+4000], parse_mode="HTML")
         else:
-            await message.answer(f"📊 **সার্চ রেজাল্ট:**\n\n{automation_result}")
+            await message.answer(automation_result, parse_mode="HTML")
 
     except Exception as e:
         error_text = str(e).replace("_", " ") 

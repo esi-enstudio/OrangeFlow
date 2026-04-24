@@ -55,10 +55,15 @@ async def trigger_sim_issue(callback: CallbackQuery, state: FSMContext):
             house = target_houses[0]
             credentials = {
                 "user": house.dms_user, "pass": house.dms_pass,
-                "house_id": house.dms_house_id, "house_name": house.name, "code": house.code
+                "house_id": house.dms_house_id, "house_name": house.name, 
+                "code": house.code # হাউজ কোড নিশ্চিত করা হয়েছে ✅
             }
             await state.update_data(credentials=credentials)
-            await callback.message.answer(f"📤 **সিম ইস্যু ({house.name})**\n\nসিম সিরিয়াল অথবা রেঞ্জ লিখে পাঠান:")
+
+            await callback.message.answer(
+                f"📤 <b>সিম ইস্যু ({house.name})</b>\n\nসিম সিরিয়াল অথবা রেঞ্জ লিখে পাঠান:",
+                parse_mode="HTML" # পার্স মুড নিশ্চিত করুন ✅
+            )
             await state.set_state(SIMIssueForm.serials)
         
         # খ. যদি একাধিক হাউজ থাকে ✅
@@ -67,8 +72,14 @@ async def trigger_sim_issue(callback: CallbackQuery, state: FSMContext):
             for h in target_houses:
                 builder.button(text=f"🏢 {h.display_name}", callback_data=f"issue_hsel_{h.id}")
             builder.adjust(1)
-            await callback.message.answer("কোন হাউজে সিম ইস্যু করতে চান? আগে হাউজ সিলেক্ট করুন:", reply_markup=builder.as_markup())
+
+            await callback.message.answer(
+                "<b>কোন হাউজে সিম ইস্যু করতে চান?</b> আগে হাউজ সিলেক্ট করুন:", 
+                reply_markup=builder.as_markup(),
+                parse_mode="HTML"
+            )
             await state.set_state(SIMIssueForm.house_selection)
+
             
     await callback.answer()
 
@@ -85,7 +96,11 @@ async def handle_issue_house_choice(callback: CallbackQuery, state: FSMContext):
         }
         await state.update_data(credentials=credentials)
     
-    await callback.message.edit_text(f"🏢 হাউজ: **{house.name}** সিলেক্ট করা হয়েছে।\n\nএখন সিম সিরিয়াল অথবা রেঞ্জ লিখে পাঠান:", parse_mode="Markdown")
+    await callback.message.edit_text(
+        f"🏢 হাউজ: <b>{house.name}</b> সিলেক্ট করা হয়েছে।\n\nএখন সিম সিরিয়াল অথবা রেঞ্জ লিখে পাঠান:", 
+        parse_mode="HTML"
+    )
+
     await state.set_state(SIMIssueForm.serials)
     await callback.answer()
 
@@ -94,7 +109,7 @@ async def handle_issue_house_choice(callback: CallbackQuery, state: FSMContext):
 async def process_issue_serials(message: Message, state: FSMContext):
     # সিরিয়াল ভ্যালিডেশন
     serials, invalid, error_msg = validate_and_expand_serials(message.text)
-    if error_msg: return await message.answer(error_msg, parse_mode="Markdown")
+    if error_msg: return await message.answer(error_msg, parse_mode="HTML")
 
     data = await state.get_data()
     credentials = data.get("credentials")
@@ -111,13 +126,14 @@ async def process_issue_serials(message: Message, state: FSMContext):
 
         if not ready_list:
             await state.clear()
-            return await message.answer(report_text + "\n\n⚠️ কোনো ইস্যুযোগ্য সিম পাওয়া যায়নি।")
+            return await message.answer(report_text, parse_mode="HTML")
         
         # পরবর্তী ধাপের জন্য ডাটা সেভ
         await state.update_data(ready_serials=ready_list)
 
-        final_msg = report_text + f"\n\n👉 মোট {bn_num(len(ready_list))}টি সিম ইস্যু করা যাবে।\n**রিটেইলার কোড (উদা: R12345) লিখে পাঠান:**"
-        await message.answer(final_msg, parse_mode="Markdown")
+        final_msg = report_text + f"\n\n👉 মোট <b>{bn_num(len(ready_list))}</b>টি সিম ইস্যু করা যাবে।\nরিটেইলার কোড (উদা: R12345) লিখে পাঠান:"
+        
+        await message.answer(final_msg, parse_mode="HTML") # parse_mode="HTML" নিশ্চিত করুন ✅
         await state.set_state(SIMIssueForm.retailer_code)
 
     except Exception as e:
@@ -129,12 +145,16 @@ async def process_final_issue(message: Message, state: FSMContext):
     retailer_code = message.text.strip().upper()
     data = await state.get_data()
     
-    wait_msg = await message.answer(f"⏳ `{retailer_code}` কোডে সিম ইস্যু করা হচ্ছে... অনুগ্রহ করে অপেক্ষা করুন।")
+    wait_msg = await message.answer(
+        f"⏳ <code>{retailer_code}</code> কোডে সিম ইস্যু করা হচ্ছে... <b>অনুগ্রহ করে অপেক্ষা করুন।</b>",
+        parse_mode="HTML"
+    )
+
     
     try:
         result = await run_finalize_issue(data['ready_serials'], retailer_code, data['credentials'])
         await wait_msg.delete()
-        await message.answer(result, parse_mode="Markdown")
+        await message.answer(result, parse_mode="HTML")
     except Exception as e:
         await wait_msg.edit_text(f"❌ সাবমিশন এরর: {str(e)}")
     finally:
