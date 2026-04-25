@@ -9,7 +9,6 @@ from sqlalchemy.orm import selectinload
 
 from app.Services.db_service import async_session
 from app.Models.user import User
-from app.Models.house import House
 from app.Models.role import Role, Permission
 from config.settings import SUPER_ADMIN_ID
 
@@ -19,16 +18,19 @@ class ACLMiddleware(BaseMiddleware):
     async def __call__(
         self,
         handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
-        event: Message,
+        event: Message | CallbackQuery,
         data: Dict[str, Any]
     ) -> Any:
         user_id = event.from_user.id
         # হ্যান্ডলার থেকে পারমিশন ফ্ল্যাগ নেওয়া
         required_permission = get_flag(data, "permission")
         today = datetime.now().date()
+        
+        # মেসেজ টেক্সট হ্যান্ডেল করা (Message বা CallbackQuery থেকে)
+        event_text = event.text if isinstance(event, Message) else None
 
         async with async_session() as session:
-            # ১. ইউজার এবং তার সকল হাউজ ও পারমিশন লোড করা
+            # ১. ডাটাবেজ থেকে ইউজার প্রোফাইল লোড করা
             result = await session.execute(
                 select(User)
                 .options(
@@ -39,42 +41,45 @@ class ACLMiddleware(BaseMiddleware):
             )
             user = result.scalar_one_or_none()
 
-            # ২. সুপার এডমিন কি সব চেক বাইপাস করবে? 
-            # প্রফেশনালভাবে: সুপার এডমিন সব বাটন দেখবে কিন্তু ইনভ্যালিড হাউজে কাজ করতে গেলে ওয়ার্নিং পাবে।
+            # ২. সুপার এডমিন কি না তা নির্ধারণ
             is_super_admin = (int(user_id) == int(SUPER_ADMIN_ID))
 
-            # ৩. সাধারণ ইউজারদের জন্য বেসিক রেজিস্ট্রেশন চেক
+            # ৩. অরেজিস্ট্রার্ড বা ইন-একটিভ ইউজার প্রটেকশন (সুপার এডমিন বাদে) ✅
             if not is_super_admin:
+                # রেজিস্ট্রেশন চেক
                 if not user:
-                    if event.text == "/start": return await handler(event, data)
-                    return await event.answer("🚫 আপনি নিবন্ধিত ইউজার নন। এডমিনের সাথে যোগাযোগ করুন।")
+                    if event_text == "/start": 
+                        return await handler(event, data)
+                    return await event.answer("🚫 আপনি নিবন্ধিত ইউজার নন। অনুগ্রহ করে আপনার আইডি এডমিনকে দিয়ে যুক্ত করে নিন।")
                 
-                # ৪. ইউজার স্ট্যাটাস চেক (Active কি না)
+                # একাউন্ট স্ট্যাটাস চেক
                 if hasattr(user, 'status') and user.status != "Active":
                     return await event.answer("🚫 আপনার অ্যাকাউন্টটি বর্তমানে স্থগিত (Inactive) আছে।")
 
-            # ৫. পারমিশন লিস্ট তৈরি
+            # ৪. পারমিশন লিস্ট প্রিপারেশন ✅
             user_permissions = []
             if is_super_admin:
+                # সুপার এডমিনের জন্য সব পারমিশন লোড
                 all_perms_res = await session.execute(select(Permission.name))
                 user_permissions = [p[0] for p in all_perms_res.all()]
             elif user:
+                # সাধারণ ইউজারের সব রোল থেকে পারমিশন সংগ্রহ
                 for role in user.roles:
                     for perm in role.permissions:
                         user_permissions.append(perm.name)
             
+            # ডুপ্লিকেট রিমুভ করে ডাটাতে পাস করা
             data["permissions"] = list(set(user_permissions))
 
-            # ৬. অত্যন্ত গুরুত্বপূর্ণ: হাউজ এবং সাবস্ক্রিপশন চেক ✅
-            # যদি এমন কোনো কাজ হয় যার জন্য পারমিশন লাগে (DMS Task, Report etc)
+            # ৫. রিকোয়ার্ড পারমিশন ও সাবস্ক্রিপশন চেক ✅
             if required_permission:
-                # ইউজারের পারমিশন চেক
+                # ক. পারমিশন চেক
                 if required_permission not in user_permissions:
-                    return await event.answer(f"❌ আপনার এই কাজের অনুমতি নেই।")
+                    return await event.answer("❌ আপনার এই কাজটি করার অনুমতি নেই।")
 
-                # যদি এটি হাউজ ভিত্তিক কোনো কাজ হয় (যেমন DMS Tasks)
-                # আমরা চেক করবো ইউজারের অন্তত ১টি একটিভ এবং মেয়াদওয়ালা হাউজ আছে কি না
-                if not is_super_admin:
+                # খ. সাবস্ক্রিপশন এবং হাউজ একটিভ স্ট্যাটাস চেক (শুধুমাত্র সাধারণ ইউজার)
+                if not is_super_admin and user:
+                    # অন্তত একটি হাউজ থাকতে হবে যার মেয়াদ আছে এবং যা একটিভ
                     active_valid_houses = [
                         h for h in user.houses 
                         if h.is_active and h.subscription_date and h.subscription_date.date() >= today
@@ -82,8 +87,9 @@ class ACLMiddleware(BaseMiddleware):
                     
                     if not active_valid_houses:
                         return await event.answer(
-                            "⚠️ আপনার হাউজের সাবস্ক্রিপশনের মেয়াদ শেষ হয়ে গেছে অথবা হাউজটি ইন-একটিভ আছে।\n"
-                            "অনুগ্রহ করে রিনিউ করতে সুপার এডমিনের সাথে যোগাযোগ করুন।"
+                            "⚠️ আপনার হাউজের সাবস্ক্রিপশনের মেয়াদ শেষ হয়ে গেছে অথবা হাউজটি বন্ধ আছে।\n"
+                            "অনুগ্রহ করে রিনিউ করতে এডমিনের সাথে যোগাযোগ করুন।"
                         )
 
+        # সব বাধা পার হলে হ্যান্ডলার এক্সিকিউট করা
         return await handler(event, data)

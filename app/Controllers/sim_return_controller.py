@@ -54,7 +54,7 @@ async def trigger_sim_return(callback: CallbackQuery, state: FSMContext):
             # এখানেও h.display_name ব্যবহার করা হয়েছে ✅
             await callback.message.answer(
                 f"🏢 হাউজ: **{house.display_name}**\n📥 সিম রিটার্ন করার জন্য সিরিয়াল অথবা রেঞ্জ লিখে পাঠান:",
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
             await state.set_state(SIMReturnForm.serials)
         
@@ -87,7 +87,7 @@ async def handle_return_house_choice(callback: CallbackQuery, state: FSMContext)
         await state.update_data(selected_house_id=house.id)
         await callback.message.edit_text(
             f"✅ নির্বাচিত হাউজ: **{house.name}**\n📥 এখন রিটার্ন করার জন্য সিরিয়াল অথবা রেঞ্জ লিখে পাঠান:",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
     
     await state.set_state(SIMReturnForm.serials)
@@ -99,7 +99,7 @@ async def process_sim_return_serials(message: Message, state: FSMContext):
     # সিরিয়াল ভ্যালিডেশন
     serials, invalid, error_msg = validate_and_expand_serials(message.text)
     if error_msg:
-        return await message.answer(error_msg, parse_mode="Markdown")
+        return await message.answer(error_msg, parse_mode="HTML")
 
     # স্টেট থেকে আগে সিলেক্ট করা হাউজ আইডি নেওয়া
     data = await state.get_data()
@@ -122,7 +122,7 @@ async def execute_sim_return_automation(message: Message, state: FSMContext, cre
     wait_msg = await message.answer(
         f"⏳ **রিটার্ন প্রসেস শুরু হয়েছে...**\n"
         f"🏢 হাউজ: {credentials['house_name']}\n",
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
     try:
@@ -130,7 +130,7 @@ async def execute_sim_return_automation(message: Message, state: FSMContext, cre
         automation_result = await run_sim_return_task(serials, credentials, current_bot, message.chat.id)
         
         await wait_msg.delete()
-        await message.answer(automation_result, parse_mode="Markdown")
+        await message.answer(automation_result, parse_mode="HTML")
 
     except Exception as e:
         error_text = str(e).replace("_", " ") 
