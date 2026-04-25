@@ -145,12 +145,18 @@ def get_user_list_kb(users):
     builder.adjust(1)
     return builder.as_markup()
 
-def get_user_action_kb(user_id):
+def get_user_action_kb(user_id, current_status):
     builder = InlineKeyboardBuilder()
+
+    # স্ট্যাটাস অনুযায়ী বাটনের নাম ও কাজ পরিবর্তন হবে
+    status_btn_text = "🔴 ডি-এক্টিভ করুন" if current_status == "Active" else "🟢 এক্টিভ করুন"
+
     builder.button(text="📝 নাম আপডেট", callback_data=f"edit_uname_{user_id}")
     builder.button(text="📞 ফোন আপডেট", callback_data=f"edit_uphone_{user_id}")
     builder.button(text="🎭 রোল পরিবর্তন", callback_data=f"edit_user_roles_{user_id}")
     builder.button(text="🏠 হাউজ পরিবর্তন", callback_data=f"edit_user_houses_{user_id}")
+    # স্ট্যাটাস টগল বাটন ✅
+    builder.button(text=status_btn_text, callback_data=f"toggle_u_status_{user_id}")
     builder.button(text="❌ ডিলিট করুন", callback_data=f"conf_del_u_{user_id}")
     builder.button(text="🔙 লিস্টে ফিরুন", callback_data="back_to_ulist")
     builder.adjust(2)
