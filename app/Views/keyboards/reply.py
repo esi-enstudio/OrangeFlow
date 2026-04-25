@@ -82,24 +82,6 @@ def get_reports_mgmt_menu(permissions: list):
 
 
 
-
-def get_report_menu(permissions: list):
-    """রিপোর্টস সাব-মেনু"""
-    buttons = []
-
-    row1 = []
-    if "view_ga_live" in permissions:
-        row1.append(KeyboardButton(text="📡 জিএ লাইভ"))
-        # ভবিষ্যতে অন্য কোনো রিপোর্টের জন্য জায়গা
-        # row1.append(KeyboardButton(text="📈 সেলস রিপোর্ট"))
-    
-    if row1: buttons.append(row1)
-    buttons.append([KeyboardButton(text="🔙 প্রধান মেনু")])
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-
-
-
 def get_field_force_menu(permissions: list):
     """ফিল্ড ফোর্স সাব-মেনু (পারমিশন ফিল্টারসহ)"""
     buttons = []
@@ -115,29 +97,6 @@ def get_field_force_menu(permissions: list):
         buttons.append(row1)
 
     # নেভিগেশন বাটন সবসময় থাকবে যদি সাব-মেনুতে ঢোকার অনুমতি থাকে
-    buttons.append([KeyboardButton(text="🔙 প্রধান মেনু")])
-    
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-
-
-
-
-def get_retailer_menu(permissions: list):
-    """রিটেইলার সাব-মেনু (পারমিশন ফিল্টারসহ)"""
-    buttons = []
-    row1 = []
-
-    if "upload_retailer_excel" in permissions:
-        row1.append(KeyboardButton(text="📤 এক্সেল আপলোড"))
-    
-    if "search_retailer" in permissions:
-        row1.append(KeyboardButton(text="🔍 রিটেইলার সার্চ"))
-
-    if row1:
-        buttons.append(row1)
-
-    # নেভিগেশন বাটন
     buttons.append([KeyboardButton(text="🔙 প্রধান মেনু")])
     
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
