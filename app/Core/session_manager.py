@@ -23,6 +23,10 @@ class SessionManager:
         return self._locks[house_code]
 
     async def get_valid_page(self, credentials: dict):
+        """
+        হাউজের সাবস্ক্রিপশন চেক এবং ডিএমএস সেশন ভ্যালিডেশন করে একটি সচল পেজ দিবে।
+        """
+
         h_code = credentials['code']
         session_path = os.path.join(SESSION_DIR, f"session_{h_code}.json")
         lock = self._get_house_lock(h_code)
@@ -40,7 +44,7 @@ class SessionManager:
             
             # মেয়াদ ডিবাগ করার জন্য প্রিন্ট লজিক
             expiry_date = house_db.subscription_date.date() if house_db.subscription_date else None
-            # logger.info(f"📊 [Check] হাউজ: {house_db.name} | মেয়াদ শেষ: {expiry_date} | আজ: {today}")
+            logger.info(f"📊 [Check] হাউজ: {house_db.name} | মেয়াদ শেষ: {expiry_date} | আজ: {today}")
 
             # স্ট্যাটাস চেক
             if not house_db.is_active:
@@ -68,7 +72,7 @@ class SessionManager:
                 logger.info(f"✅ [Manager] {h_code} ডিএমএস সেশন সচল আছে।")
                 return page, context
             else:
-                logger.warning(f"⚠️ [Manager] {h_code} সেশন মৃত। অটো-লগইন শুরু...")
+                logger.warning(f"⚠️ [Manager] {h_code} সেশন নেই। অটো-লগইন শুরু...")
                 success = await dms_login.perform_login(page, credentials, session_path)
                 
                 if success:

@@ -65,10 +65,15 @@ dist/
 # ================================
 # Temporary Files
 # ================================
+# Temporary Files
 *.swp
-*.swo__pycache__/
+*.swo
+
+# Bytecode and Cache
+__pycache__/
 *.pyc
 
+# Project Specific
 browser_profiles/
 sessions/
 temp_downloads/

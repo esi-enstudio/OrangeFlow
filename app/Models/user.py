@@ -27,6 +27,7 @@ class User(Base):
     telegram_id = Column(BigInteger, unique=True, nullable=False)
     name = Column(String, nullable=True)
     phone_number = Column(String, nullable=True)
+    status = Column(String, default="Active", nullable=False) # Active অথবা Inactive
 
     # মেনি-টু-মেনি রিলেশনশিপ (রোল টেবিলের সাথে)
     roles = relationship("Role", secondary=user_roles, back_populates="users", lazy="selectin")
