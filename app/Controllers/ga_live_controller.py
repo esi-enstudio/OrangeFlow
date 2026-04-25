@@ -14,7 +14,7 @@ from app.Models.ga_filter import GAProductFilter, GARetailerFilter
 from app.Services.db_service import async_session
 from app.Utils.helpers import bn_num
 from config.settings import SUPER_ADMIN_ID
-from app.Views.keyboards.reply import get_reports_mgmt_menu, get_admin_main_menu
+from app.Views.keyboards.reply import get_reports_mgmt_menu
 
 logger = logging.getLogger(__name__)
 router = Router()
