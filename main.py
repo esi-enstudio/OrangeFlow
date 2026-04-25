@@ -146,18 +146,23 @@ async def main():
 
     background_tasks = []
     try:
-        # ওটিপি রিসিভার সার্ভার (এটি সেটিংস থেকে মাস্টার/স্লেভ রোল নিবে)
+        # ওটিপি রিসিভার সার্ভার (এটি সবসময় চালু থাকবে)
         webhook_task = asyncio.create_task(start_webhook_server(settings.WEBHOOK_PORT))
-        
-        # মাস্টার সিডিউলার চালু করা (এটি সিঙ্ক এবং সেশন দুটোই দেখবে) ✅
-        scheduler_task = asyncio.create_task(master_automation_scheduler())
-        
-        background_tasks.extend([webhook_task, scheduler_task])
+        background_tasks.append(webhook_task)
+
+        # জিএ লাইভ সিঙ্ক সিডিউলার (.env থেকে কন্ট্রোল হবে) ✅
+        if settings.ENABLE_GA_SYNC:
+            scheduler_task = asyncio.create_task(master_automation_scheduler())
+            background_tasks.append(scheduler_task)
+            logger.info("📡 [System] GA Live Sync সিডিউলার চালু হয়েছে।")
+        else:
+            logger.warning("🚫 [System] GA Live Sync বর্তমানে .env থেকে বন্ধ রাখা হয়েছে।")
 
         logger.info(f"🤖 Bot is Live! Mode: {'Master (Ngrok ON)' if settings.START_NGROK else 'Slave (Local Only)'}")
 
         # টেলিগ্রাম পোলিং শুরু
         await dp.start_polling(bot)
+
 
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
