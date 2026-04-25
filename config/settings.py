@@ -12,6 +12,7 @@ FORWARD_OTPS_TO = os.getenv("FORWARD_OTPS_TO")
 START_NGROK = os.getenv("START_NGROK", "False") == "True"
 STATIC_DOMAIN = os.getenv("STATIC_DOMAIN")
 DISABLE_SCHEDULER = os.getenv("DISABLE_SCHEDULER", "False") == "True"
+ENABLE_GA_SYNC = os.getenv("ENABLE_GA_SYNC", "False").lower() in ("true", "1", "t")
 
 
 
