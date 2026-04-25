@@ -58,6 +58,9 @@ async def render_user_details(message: Message, user_id: int):
         house_names = ", ".join([h.name for h in u.houses]) if u.houses else "হাউজ নেই"
         role_names = ", ".join([r.name for r in u.roles]) if u.roles else "রোল নেই"
 
+        # স্ট্যাটাস ইমোজি নির্ধারণ ✅
+        status_display = "🟢 সক্রিয় (Active)" if u.status == "Active" else "🔴 স্থগিত (Inactive)"
+
         details = (
             f"👤 **ইউজার ডিটেইলস**\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -66,10 +69,11 @@ async def render_user_details(message: Message, user_id: int):
             f"📛 নাম: {u.name}\n"
             f"📞 ফোন: {u.phone_number or 'N/A'}\n"
             f"🛠 রোল: {role_names}\n"
+            f"📌 স্ট্যাটাস: **{status_display}**\n"
             f"────────────────────"
         )
         
-        kb = get_user_action_kb(u.id)
+        kb = get_user_action_kb(u.id, u.status)
         
         # যদি কলব্যাক কুয়েরি থেকে আসে (edit_text এর জন্য)
         if isinstance(message, CallbackQuery):
@@ -80,41 +84,6 @@ async def render_user_details(message: Message, user_id: int):
         else:
             await message.answer(details, reply_markup=kb, parse_mode="Markdown")
             
-            
-# async def render_user_details(message: Message, user_id: int):
-#     """ইউজারের বিস্তারিত তথ্য দেখানোর কমন ফাংশন"""
-#     async with async_session() as session:
-#         result = await session.execute(
-#             select(DBUser)
-#             .where(DBUser.id == user_id)
-#             .options(selectinload(DBUser.roles), selectinload(DBUser.houses))
-#         )
-#         u = result.scalar_one_or_none()
-#         if not u:
-#             return await message.answer("❌ ইউজার পাওয়া যায়নি।")
-            
-#         house_names = ", ".join([h.name for h in u.houses]) if u.houses else "হাউজ নেই"
-#         role_names = ", ".join([r.name for r in u.roles]) if u.roles else "রোল নেই"
-
-#         details = (
-#             f"👤 **ইউজার ডিটেইলস**\n"
-#             f"━━━━━━━━━━━━━━━━━━━━\n"
-#             f"🏠 হাউজ(সমূহ): **{house_names}**\n"
-#             f"🆔 আইডি: `{u.telegram_id}`\n"
-#             f"📛 নাম: {u.name}\n"
-#             f"📞 ফোন: {u.phone_number or 'দেওয়া নেই'}\n"
-#             f"🛠 রোল: {role_names}\n"
-#             f"────────────────────"
-#         )
-        
-#         # কলব্যাক মেসেজ হলে এডিট করবে, ডিরেক্ট মেসেজ হলে নতুন পাঠাবে
-#         try:
-#             if callback_query := getattr(message, "message", None): # যদি কলব্যাক থেকে আসে
-#                 await message.edit_text(details, reply_markup=get_user_action_kb(u.id), parse_mode="Markdown")
-#             else:
-#                 await message.answer(details, reply_markup=get_user_action_kb(u.id), parse_mode="Markdown")
-#         except Exception:
-#             await message.answer(details, reply_markup=get_user_action_kb(u.id), parse_mode="Markdown")
 
 # ==========================================
 # 3. USER MANAGEMENT UI
@@ -448,6 +417,27 @@ async def save_user_roles_final(callback: CallbackQuery, state: FSMContext):
     await callback.answer("✅ রোল আপডেট হয়েছে", show_alert=True)
     # ডাটা রি-রেন্ডার করে প্রোফাইল দেখানো
     await render_user_details(callback.message, user_id)
+
+# --- ইউজার স্ট্যাটাস টগল (Active <-> Inactive) ✅ ---
+@router.callback_query(F.data.startswith("toggle_u_status_"), flags={"permission": "edit_user"})
+async def handle_toggle_user_status(callback: CallbackQuery):
+    user_id = int(callback.data.split("_")[3])
+    
+    async with async_session() as session:
+        u = await session.get(DBUser, user_id)
+        if not u:
+            return await callback.answer("❌ ইউজার পাওয়া যায়নি।", show_alert=True)
+        
+        # স্ট্যাটাস পরিবর্তন লজিক
+        old_status = u.status
+        u.status = "Inactive" if old_status == "Active" else "Active"
+        await session.commit()
+        
+        new_status_msg = "স্থগিত (Inactive)" if u.status == "Inactive" else "সক্রিয় (Active)"
+        await callback.answer(f"✅ ইউজারের স্ট্যাটাস এখন {new_status_msg}", show_alert=True)
+        
+    # প্রোফাইলটি পুনরায় রিফ্রেশ করে দেখানো
+    await render_user_details(callback, user_id)
 
     
 @router.message(F.text == "🔙 প্রধান মেনু")
