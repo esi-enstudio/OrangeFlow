@@ -218,34 +218,40 @@ def get_bts_main_kb(house_id, total_count, permissions: list):
     return builder.as_markup()
 
 # বিটিএস লিস্ট পেজিনেশন (৫টি করে এবং পাশাপাশি বাটন) ✅
-def get_bts_pagination_kb(items, page, total_pages, house_id):
-    """বিটিএস তালিকা (কোড এবং শর্ট অ্যাড্রেস সহ)"""
+def get_bts_pagination_kb(items, offset, total, house_id, thana_name):
+    """থানা ভিত্তিক পেজিনেশন কিবোর্ড ✅"""
     builder = InlineKeyboardBuilder()
-    
     for b in items:
-        # মডেলের কলাম নাম 'short_address' হুবহু ব্যবহার করা হয়েছে
-        addr = b.short_address if b.short_address else "ঠিকানা নেই"
-
-        # বাটন টেক্সট ফরম্যাট: 📡 DHK4769 (বায়েরবালি)
-        builder.button(
-            text=f"📡 {b.bts_code} ({addr})", 
-            callback_data=f"bts_view_{b.id}"
-        )
+        addr = b.short_address if b.short_address else "N/A"
+        builder.button(text=f"📡 {b.bts_code} ({addr})", callback_data=f"bts_view_{b.id}")
     
     builder.adjust(1)
-
-    # নেভিগেশন বাটন
+    
+    # নেভিগেশন (Previous/Next পাশাপাশি)
     nav = []
-    if page > 1:
-        nav.append(InlineKeyboardButton(text="⬅️ Previous", callback_data=f"bts_list_{house_id}_{((page-2)*5)}"))
-    if page < total_pages:
-        nav.append(InlineKeyboardButton(text="Next ➡️", callback_data=f"bts_list_{house_id}_{(page*5)}"))
+    if offset > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Previous", callback_data=f"btsthana:{house_id}:{thana_name}:{offset-5}"))
+    if offset + 5 < total:
+        nav.append(InlineKeyboardButton(text="Next ➡️", callback_data=f"btsthana:{house_id}:{thana_name}:{offset+5}"))
     
-    if nav:
-        builder.row(*nav)
+    if nav: builder.row(*nav)
     
+    # ব্যাকে গেলে আবার থানার লিস্ট দেখাবে
+    builder.row(InlineKeyboardButton(text="🔙 থানার লিস্ট", callback_data=f"bts_list_{house_id}_0"))
+    
+    return builder.as_markup()
+
+def get_bts_search_results_kb(results, house_id):
+    """সার্চ রেজাল্ট কিবোর্ড"""
+    builder = InlineKeyboardBuilder()
+    for b in results:
+        addr = b.short_address if b.short_address else "N/A"
+        builder.button(text=f"📡 {b.bts_code} ({addr})", callback_data=f"bts_view_{b.id}")
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="🔍 নতুন সার্চ", callback_data="bts_search_start"))
     builder.row(InlineKeyboardButton(text="🔙 মেইন মেনু", callback_data=f"bts_hsel_{house_id}"))
     return builder.as_markup()
+
 
 
 # বিটিএস অ্যাকশন বাটন

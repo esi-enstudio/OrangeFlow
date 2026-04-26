@@ -1,4 +1,5 @@
 import os
+import unicodedata
 import asyncio
 import logging
 from aiogram import Router, F, types
@@ -14,6 +15,7 @@ from app.Models.user import User
 from app.Models.house import House
 from app.Services.db_service import async_session
 from app.Services.Automation.bts_excel import process_bts_excel, generate_bts_sample
+from app.Views.keyboards.inline import get_bts_pagination_kb, get_bts_search_results_kb
 from app.Utils.helpers import bn_num
 from config.settings import SUPER_ADMIN_ID
 
@@ -130,67 +132,59 @@ async def render_bts_dashboard(message: Message, house_id: int, permissions: lis
 # ==========================================
 # ৩. লিস্ট এবং পেজিনেশন (পাশাপাশি বাটন)
 # ==========================================
+# ১. থানা সিলেকশন মেনু
 @router.callback_query(F.data.startswith("bts_list_"))
-async def list_bts(callback: CallbackQuery, state: FSMContext):
-    # ডাটা পার্স করা
-    parts = callback.data.split("_")
-    house_id = int(parts[2])
-    offset = int(parts[3])
+async def list_thana_selection(callback: CallbackQuery):
+    house_id = int(callback.data.split("_")[2])
     
     async with async_session() as session:
-        # ১. ডাটাবেজ থেকে মোট বিটিএস সংখ্যা এবং নির্দিষ্ট পেজের ডাটা সংগ্রহ
-        total = await session.scalar(select(func.count(BTS.id)).where(BTS.house_id == house_id))
+        # ওই হাউজের সব ইউনিক থানার নাম (বাংলায়) সংগ্রহ ✅
         res = await session.execute(
-            select(BTS)
-            .where(BTS.house_id == house_id)
-            .order_by(BTS.bts_code) # কোড অনুযায়ী সাজানো
-            .limit(PAGE_LIMIT)
-            .offset(offset)
+            select(BTS.thana_bn).where(BTS.house_id == house_id).distinct().order_by(BTS.thana_bn)
         )
-        items = res.scalars().all()
+        thanas = res.scalars().all()
+
+        if not thanas:
+            return await callback.answer("⚠️ কোনো ডাটা পাওয়া যায়নি।", show_alert=True)
 
         builder = InlineKeyboardBuilder()
-
-        # ২. বিটিএস বাটন তৈরি (সাইট আইডির বদলে শর্ট অ্যাড্রেস ব্যবহার করা হয়েছে) ✅
-        for b in items:
-            # যদি শর্ট অ্যাড্রেস না থাকে তবে 'ঠিকানা নেই' দেখাবে
-            addr = b.short_address if b.short_address else "ঠিকানা নেই"
-            builder.button(
-                text=f"📡 {b.bts_code} ({addr})", 
-                callback_data=f"bts_view_{b.id}"
-            )
+        for thana in thanas:
+            t_name = thana if thana else "অজানা থানা"
+            # কলব্যাক ফরম্যাট: btsthana_{house_id}_{thana_name}
+            builder.button(text=f"📍 {t_name}", callback_data=f"btsthana:{house_id}:{t_name}")
         
-        # প্রতি লাইনে ১টি করে বিটিএস বাটন
-        builder.adjust(1)
+        builder.adjust(2)
+        builder.row(InlineKeyboardButton(text="🔙 ব্যাকে যান", callback_data=f"bts_hsel_{house_id}"))
 
-        # ৩. পেজিনেশন বাটন (Previous এবং Next পাশাপাশি থাকবে) ✅
-        nav = []
-        if offset > 0:
-            nav.append(InlineKeyboardButton(
-                text="⬅️ Previous", 
-                callback_data=f"bts_list_{house_id}_{offset - PAGE_LIMIT}"
-            ))
-
-        if offset + PAGE_LIMIT < total:
-            nav.append(InlineKeyboardButton(
-                text="Next ➡️", 
-                callback_data=f"bts_list_{house_id}_{offset + PAGE_LIMIT}"
-            ))
-
-        # নেভিগেশন বাটনগুলো পাশাপাশি রো-তে রাখা
-        if nav:
-            builder.row(*nav)
-        
-        # ৪. মেইন মেনু বাটন সবার নিচে আলাদা রো-তে
-        builder.row(InlineKeyboardButton(text="🔙 মেইন মেনু", callback_data=f"bts_hsel_{house_id}"))
-        
-        # ৫. মেসেজ এডিট করে ইউজারকে দেখানো
         await callback.message.edit_text(
-            f"📋 **বিটিএস তালিকা** (মোট: {bn_num(total)} টি):\n"
-            f"বিস্তারিত দেখতে নিচের বাটনে ক্লিক করুন।", 
+            "🏘 <b>থানা নির্বাচন করুন:</b>\nনিচের কোন থানার বিটিএস তালিকা দেখতে চান?",
             reply_markup=builder.as_markup(),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
+
+# ২. নির্বাচিত থানার বিটিএস লিস্ট (পেজিনেশন সহ)
+@router.callback_query(F.data.startswith("btsthana:"))
+async def list_bts_by_thana(callback: CallbackQuery):
+    # ফরম্যাট: btsthana:house_id:thana_name:offset
+    parts = callback.data.split(":")
+    house_id = int(parts[1])
+    thana_name = parts[2]
+    offset = int(parts[3]) if len(parts) > 3 else 0
+    limit = 5
+
+    async with async_session() as session:
+        # ফিল্টার্ড ডাটা সংগ্রহ
+        query = select(BTS).where(BTS.house_id == house_id, BTS.thana_bn == thana_name)
+        total = await session.scalar(select(func.count()).select_from(query.subquery()))
+        
+        res = await session.execute(query.order_by(BTS.bts_code).limit(limit).offset(offset))
+        items = res.scalars().all()
+
+        # কিবোর্ডে এখন থানা নামও পাঠাতে হবে যাতে নেক্সট পেজ কাজ করে
+        kb = get_bts_pagination_kb(items, offset, total, house_id, thana_name)
+        
+        text = f"📋 <b>থানা: {thana_name}</b>\nমোট বিটিএস: {bn_num(total)} টি"
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 # ==========================================
@@ -420,8 +414,16 @@ async def start_bts_search(callback: CallbackQuery, state: FSMContext):
 
 @router.message(BTSStates.search_query)
 async def process_bts_search(message: Message, state: FSMContext):
-    """সার্চ রেজাল্ট প্রসেসিং"""
-    query = message.text.strip()
+    """স্মার্ট সার্চ: ইউনিকোড নরমালাইজেশন সহ ✅"""
+    
+    # ১. ইনপুট নরমালাইজ করা (NFC ফরম্যাটে)
+    # এটি টাইপ করা এবং কপি করা উভয় টেক্সটকে একই ইউনিকোড কোডে রূপান্তর করবে
+    raw_query = message.text.strip()
+    query = unicodedata.normalize('NFC', raw_query)
+    
+    # ২. বাড়তি সতর্কতা: জিরো উইডথ ক্যারেক্টার রিমুভ (কিবোর্ডের অদৃশ্য অক্ষর)
+    query = query.replace('\u200d', '').replace('\u200c', '')
+
     data = await state.get_data()
     house_id = data.get('selected_house_id')
 
@@ -429,8 +431,9 @@ async def process_bts_search(message: Message, state: FSMContext):
         return await message.answer("⚠️ অন্তত ২ অক্ষরের নাম বা কোড লিখুন।")
 
     async with async_session() as session:
-        # ডাটাবেজে সার্চ করা (সংশ্লিষ্ট হাউজের ভেতর)
+        # ৩. স্মার্ট প্যাটার্ন তৈরি
         search_pattern = f"%{query}%"
+
         res = await session.execute(
             select(BTS).where(
                 BTS.house_id == house_id,
@@ -438,19 +441,31 @@ async def process_bts_search(message: Message, state: FSMContext):
                     BTS.bts_code.ilike(search_pattern),
                     BTS.site_id.ilike(search_pattern),
                     BTS.address.ilike(search_pattern),
-                    BTS.short_address.ilike(search_pattern)
+                    BTS.address_bn.ilike(search_pattern),
+                    BTS.thana.ilike(search_pattern),
+                    BTS.thana_bn.ilike(search_pattern)
                 )
             ).limit(10)
         )
         results = res.scalars().all()
 
         if not results:
-            return await message.answer(f"❌ '{query}' সম্পর্কিত কোনো বিটিএস পাওয়া যায়নি।")
+            # যদি রেজাল্ট না পাওয়া যায়, তবে NFD ফরম্যাটে একবার ট্রাই করা (অতিরিক্ত নিরাপত্তা)
+            query_alt = unicodedata.normalize('NFD', query)
+            search_pattern_alt = f"%{query_alt}%"
+            res_alt = await session.execute(
+                select(BTS).where(BTS.house_id == house_id, BTS.thana_bn.ilike(search_pattern_alt))
+            )
+            results = res_alt.scalars().all()
 
+        if not results:
+            return await message.answer(f"❌ '{raw_query}' সম্পর্কিত কোনো বিটিএস পাওয়া যায়নি।")
+
+        # বাকি বাটন জেনারেশন লজিক (আগের মতই থাকবে)...
         builder = InlineKeyboardBuilder()
         for b in results:
-            s_addr = b.short_address if b.short_address else "N/A"
-            builder.button(text=f"📡 {b.bts_code} ({s_addr})", callback_data=f"bts_view_{b.id}")
+            addr = b.short_address if b.short_address else "N/A"
+            builder.button(text=f"📡 {b.bts_code} ({addr})", callback_data=f"bts_view_{b.id}")
         
         builder.button(text="🔍 নতুন সার্চ", callback_data="bts_search_start")
         builder.button(text="🔙 মেনু", callback_data=f"bts_hsel_{house_id}")
@@ -462,7 +477,6 @@ async def process_bts_search(message: Message, state: FSMContext):
             parse_mode="HTML"
         )
     
-    # শুধু সার্চ স্টেট ক্লিয়ার করা যাতে হাউজ আইডি মেমোরিতে থাকে ✅
     await state.set_state(None)
 
 # --- ২. স্যাম্পল ডাউনলোড লজিক (সংশোধিত) ✅ ---
