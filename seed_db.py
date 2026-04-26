@@ -40,7 +40,11 @@ async def seed_data():
             "create_retailers",
             "view_retailers",
             "edit_retailers",
-            "delete_retailers"
+            "delete_retailers",
+            "create_bts",
+            "view_bts",
+            "edit_bts",
+            "delete_bts",
         ]
         
         db_perms = {}

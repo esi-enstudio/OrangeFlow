@@ -7,29 +7,36 @@ class BTS(Base):
     __tablename__ = "bts_list"
 
     id = Column(Integer, primary_key=True)
-    house_id = Column(Integer, ForeignKey('houses.id'), nullable=True)
+    house_id = Column(Integer, ForeignKey('houses.id'), nullable=False)
     
-    # স্ক্রিনশট অনুযায়ী কলামসমূহ
-    bts_code = Column(String, unique=True, index=True) # BTS Code (DHK6400)
-    thana = Column(String)
-    district = Column(String)
-    division = Column(String)
-    region = Column(String)
-    network_mode = Column(String) # 2G+4G
-    address = Column(String)      # BTS Address
-    cluster = Column(String)
+    # এক্সেল হেডার অনুযায়ী কলামসমূহ
+    site_id = Column(String, unique=True, index=True) # Site ID
+    bts_code = Column(String, unique=True, index=True) # BTS Code
+    site_type = Column(String)                        # Site Type
+    thana = Column(String)                            # Thana
+    thana_bn = Column(String)                         # Thana Bn
+    district = Column(String)                         # District
+    district_bn = Column(String)                      # District Bn
+    division = Column(String)                         # Division
+    division_bn = Column(String)                      # Division Bn
+    cluster = Column(String)                          # Cluster
+    cluster_bn = Column(String)                       # Cluster Bn
+    region = Column(String)                           # Region
+    region_bn = Column(String)                         # Region Bn
+    network_mode = Column(String)                     # Network Mode
+    address = Column(String)                          # Address
+    address_bn = Column(String)                       # Address Bn
+    short_address = Column(String)                    # Short Address
     longitude = Column(String)
     latitude = Column(String)
-    distributor_code = Column(String)
-    on_air_date_2g = Column(String) # 2Gonairdate
-    on_air_date_3g = Column(String) # 3Gonairdate
-    on_air_date_4g = Column(String) # 4Gonairdate
-    urban_rural = Column(String)
-    thana_project = Column(String)
-    lus = Column(String)
-    sran = Column(String)
-    rest = Column(String)
-    union_name = Column(String)    # UNUID_Union name
+    archetype = Column(String)                        # Archetype
+    market = Column(String)                           # Market
+    distributor_code = Column(String)                 # Distributor Code
+    onair_date_2g = Column(String)                    # 2Gonairdate
+    onair_date_3g = Column(String)                    # 3Gonairdate
+    onair_date_4g = Column(String)                    # 4Gonairdate
+    urban_rural = Column(String)                      # Urban_Rural
+    priority = Column(String)                         # Priority
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())

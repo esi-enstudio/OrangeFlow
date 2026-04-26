@@ -31,12 +31,18 @@ def get_admin_main_menu(permissions: list):
     if row3: 
         buttons.append(row3)
     
-    # ৪র্থ রো: মেলা এবং বিটিএস
+    # ৪র্থ রো: মেলা এবং বিটিএস (আপডেটেড লজিক) ✅
     row4 = []
+    
+    # মেলা ম্যানেজমেন্ট চেক
     if "manage_mela" in permissions: 
         row4.append(KeyboardButton(text="🎪 মেলা ম্যানেজমেন্ট"))
-    if "manage_bts" in permissions: 
+    
+    # বিটিএস লিস্ট চেক (যেকোনো একটি পারমিশন থাকলে বাটন আসবে) ✅
+    bts_perms = ["create_bts", "view_bts", "edit_bts", "delete_bts"]
+    if any(p in permissions for p in bts_perms):
         row4.append(KeyboardButton(text="📡 বিটিএস লিস্ট"))
+        
     if row4: 
         buttons.append(row4)
     

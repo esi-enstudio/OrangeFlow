@@ -20,7 +20,8 @@ from app.Controllers import (
     admin_controller, house_controller, user_controller,
     role_controller, automation_controller, sim_status_controller,
     sim_return_controller, sim_issue_controller, ga_live_controller,
-    field_force_controller, retailer_controller, ga_filter_controller
+    field_force_controller, retailer_controller, ga_filter_controller,
+    bts_controller,
 )
 
 # --- ২. লগিং কনফিগারেশন (সাইলেন্ট মুড) ---
@@ -38,21 +39,6 @@ logging.getLogger("playwright").setLevel(logging.ERROR)
 logging.getLogger("aiogram.dispatcher").setLevel(logging.CRITICAL)
 
 logger = logging.getLogger(__name__)
-
-# # লাইব্রেরিগুলোর অপ্রয়োজনীয় লগ বন্ধ রাখা (শুধুমাত্র সিরিয়াস এরর দেখাবে)
-# logging.getLogger("aiogram").setLevel(logging.ERROR)
-# logging.getLogger("pyngrok").setLevel(logging.ERROR)
-# logging.getLogger("aiohttp").setLevel(logging.ERROR)
-# logging.getLogger("asyncio").setLevel(logging.CRITICAL)
-# logging.getLogger("playwright").setLevel(logging.ERROR)
-# logging.getLogger("aiogram.dispatcher").setLevel(logging.CRITICAL)
-
-# # নিজস্ব মডিউলগুলোর জন্য INFO লেভেল নিশ্চিত করা
-# logging.getLogger("app.Core.login_manager").setLevel(logging.INFO)
-# logging.getLogger("app.Core.session_manager").setLevel(logging.INFO)
-# logging.getLogger("app.Core.automation_engine").setLevel(logging.INFO)
-
-# logger = logging.getLogger(__name__)
 
 # ==========================================
 # MASTER AUTOMATION SCHEDULER
@@ -138,7 +124,8 @@ async def main():
         automation_controller.router, sim_status_controller.router,
         sim_return_controller.router, sim_issue_controller.router,
         ga_live_controller.router, field_force_controller.router,
-        retailer_controller.router, ga_filter_controller.router
+        retailer_controller.router, ga_filter_controller.router,
+        bts_controller.router,
     )
 
     # পেন্ডিং মেসেজ স্কিপ করা

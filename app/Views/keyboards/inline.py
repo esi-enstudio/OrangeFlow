@@ -200,3 +200,59 @@ def get_house_edit_fields_kb(house_id):
     builder.button(text="🔙 বিস্তারিত পেজে ফিরুন", callback_data=f"view_h_{house_id}")
     builder.adjust(2)
     return builder.as_markup()
+
+
+# বিটিএস মেইন মেনু
+def get_bts_main_kb(house_id, total_count, permissions: list):
+    builder = InlineKeyboardBuilder()
+    if total_count > 0:
+        builder.row(
+            InlineKeyboardButton(text="📋 লিস্ট দেখুন", callback_data=f"bts_list_{house_id}_1"),
+            InlineKeyboardButton(text="🔍 সার্চ করুন", callback_data=f"bts_search_{house_id}")
+        )
+    if "create_bts" in permissions:
+        builder.row(InlineKeyboardButton(text="📤 এক্সেল আপলোড", callback_data=f"bts_upload_{house_id}"))
+    
+    builder.row(InlineKeyboardButton(text="📥 স্যাম্পল ডাউনলোড", callback_data="bts_sample_dl"))
+    builder.row(InlineKeyboardButton(text="🔄 হাউজ পরিবর্তন", callback_data="bts_change_house"))
+    return builder.as_markup()
+
+# বিটিএস লিস্ট পেজিনেশন (৫টি করে এবং পাশাপাশি বাটন) ✅
+def get_bts_pagination_kb(items, page, total_pages, house_id):
+    """বিটিএস তালিকা (কোড এবং শর্ট অ্যাড্রেস সহ)"""
+    builder = InlineKeyboardBuilder()
+    
+    for b in items:
+        # মডেলের কলাম নাম 'short_address' হুবহু ব্যবহার করা হয়েছে
+        addr = b.short_address if b.short_address else "ঠিকানা নেই"
+
+        # বাটন টেক্সট ফরম্যাট: 📡 DHK4769 (বায়েরবালি)
+        builder.button(
+            text=f"📡 {b.bts_code} ({addr})", 
+            callback_data=f"bts_view_{b.id}"
+        )
+    
+    builder.adjust(1)
+
+    # নেভিগেশন বাটন
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton(text="⬅️ Previous", callback_data=f"bts_list_{house_id}_{((page-2)*5)}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton(text="Next ➡️", callback_data=f"bts_list_{house_id}_{(page*5)}"))
+    
+    if nav:
+        builder.row(*nav)
+    
+    builder.row(InlineKeyboardButton(text="🔙 মেইন মেনু", callback_data=f"bts_hsel_{house_id}"))
+    return builder.as_markup()
+
+
+# বিটিএস অ্যাকশন বাটন
+def get_bts_action_kb(bts_id, house_id, permissions: list):
+    builder = InlineKeyboardBuilder()
+    if "edit_bts" in permissions: builder.button(text="✏️ এডিট", callback_data=f"bts_edit_{bts_id}")
+    if "delete_bts" in permissions: builder.button(text="🗑 ডিলিট", callback_data=f"bts_del_{bts_id}")
+    builder.button(text="🔙 লিস্টে ফিরুন", callback_data=f"bts_list_{house_id}_1")
+    builder.adjust(2)
+    return builder.as_markup()
