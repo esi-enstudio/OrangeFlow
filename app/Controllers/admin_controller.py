@@ -11,6 +11,27 @@ from config.settings import SUPER_ADMIN_ID
 
 router = Router()
 
+@router.message(Command("cancel"))
+@router.message(F.text.casefold() == "cancel")
+async def cancel_handler(message: Message, state: FSMContext):
+    """যেকোনো চলমান FSM প্রসেস (যেমন এডিট বা আপলোড) বাতিল করবে"""
+    current_state = await state.get_state()
+    
+    if current_state is None:
+        # কোনো প্রসেস চালু না থাকলে চুপচাপ মেইন মেনু দিয়ে দিবে
+        return await message.answer("বর্তমানে কোনো কাজ চালু নেই।", reply_markup=get_admin_main_menu([])) # প্রয়োজন অনুযায়ী পারমিশন পাস করুন
+
+    # ১. স্টেট ক্লিয়ার করা ✅
+    await state.clear()
+    
+    # ২. ইউজারকে জানানো এবং কিবোর্ড রিমুভ বা রিসেট করা
+    from app.Views.keyboards.reply import get_admin_main_menu
+    # এখানে মিডলওয়্যার থেকে পাওয়া পারমিশন ব্যবহার করা ভালো, আপাতত খালি লিস্ট দিলাম
+    await message.answer(
+        "❌ বর্তমান কাজটি বাতিল করা হয়েছে। আপনি এখন প্রধান মেনুতে আছেন।",
+        reply_markup=get_admin_main_menu([]) 
+    )
+
 @router.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext, permissions: list = None):
     """স্টার্ট কমান্ড: ইউজার পারমিশন অনুযায়ী মেনু প্রদর্শন করবে"""
