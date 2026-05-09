@@ -11,6 +11,7 @@ from app.Models.house import House
 from app.Models.live_activation import LiveActivation
 from app.Models.field_force import FieldForce
 from app.Models.ga_filter import GAProductFilter, GARetailerFilter
+from app.Models.mela import Mela, MelaAssignment
 from app.Services.db_service import async_session
 from app.Utils.helpers import bn_num
 from config.settings import SUPER_ADMIN_ID
@@ -250,8 +251,15 @@ async def send_ga_detailed_report(message: Message, house: House, user_id: int, 
         # ৪. গ্লোবাল ফুটার (হাউজের সর্বমোট)
         text += "━━━━━━━━━━━━━━━━━━━━\n"
         text += f"🔥 <b>হাউজের সর্বমোট জিএঃ {bn_num(house_total)}টি</b>\n"
-        text += "🕒 জিএ রিপোর্টটি প্রতি ৫ মিনিট পর পর স্বয়ংক্রিয়ভাবে আপডেট হয়।"
+        # text += "🕒 জিএ রিপোর্টটি প্রতি ৫ মিনিট পর পর স্বয়ংক্রিয়ভাবে আপডেট হয়।"
 
+        # ৫. মেলা রিপোর্ট (যদি আজকের তারিখে মেলা থাকে)
+        from datetime import date
+        today_date = date.today()
+        mela_report = await generate_mela_report(session, house.id, today_date)
+        if mela_report:
+            # text += "\n\n━━━━━━━━━━━━━━━━━━━━\n"
+            text += mela_report
 
         # ৩. বাটন (রিফ্রেশ এবং ব্যাক)
         builder = InlineKeyboardBuilder()
@@ -282,3 +290,149 @@ async def send_ga_detailed_report(message: Message, house: House, user_id: int, 
                 await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         else:
             await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+
+async def generate_mela_report(session, house_id, today_date):
+    """আজকের তারিখে মেলা থাকলে রিপোর্ট টেক্সট রিটার্ন করে, নাহলে খালি স্ট্রিং।"""
+    from datetime import date
+    # মেলা খুঁজুন
+    mela_res = await session.execute(
+        select(Mela)
+        .where(Mela.house_id == house_id, Mela.activity_date == today_date)
+        .options(selectinload(Mela.mela_type), selectinload(Mela.mela_activity),
+                 selectinload(Mela.covered_bts), selectinload(Mela.assignments))
+    )
+    mela = mela_res.scalar_one_or_none()
+    if not mela:
+        return ""
+    
+    # মেলা ডিটেইল
+    mela_type = mela.mela_type.name if mela.mela_type else "N/A"
+    mela_activity = mela.mela_activity.name if mela.mela_activity else "N/A"
+    thana = mela.thana or "N/A"
+    location = mela.location or "N/A"
+    
+    # বিটিএস লিস্ট
+    bts_lines = []
+    for idx, bts in enumerate(mela.covered_bts, 1):
+        bts_lines.append(f" {bn_num(idx)} {bts.bts_code}-{bts.short_address_bn or 'N/A'}")
+    bts_text = "\n".join(bts_lines) if bts_lines else "কোনো বিটিএস নেই"
+    
+    # অংশগ্রহণকারী সংগ্রহ
+    rso_assignments = [a for a in mela.assignments if a.role_type == 'RSO']
+    bp_assignments = [a for a in mela.assignments if a.role_type == 'BP']
+    retailer_assignments = [a for a in mela.assignments if a.role_type == 'SSO']
+    
+    # অ্যাক্টিভেশন গণনা
+    # আজকের অ্যাক্টিভেশন থেকে retailer_code অনুযায়ী গণনা
+    act_res = await session.execute(
+        select(LiveActivation.retailer_code, func.count(LiveActivation.id))
+        .where(LiveActivation.house_id == house_id, LiveActivation.activation_date == today_date.strftime("%d-%b-%Y"))
+        .group_by(LiveActivation.retailer_code)
+    )
+    activation_map = {str(code).upper(): count for code, count in act_res.all()}
+    
+    # FieldForce ডিটেইলস ফেচ করার জন্য
+    all_codes = set()
+    for a in rso_assignments + bp_assignments + retailer_assignments:
+        if a.retailer_code:
+            all_codes.add(a.retailer_code.upper())
+    
+    field_force_map = {}
+    if all_codes:
+        ff_res = await session.execute(
+            select(FieldForce)
+            .where(FieldForce.assisted_retailer_code.in_(all_codes))
+        )
+        for ff in ff_res.scalars():
+            field_force_map[ff.assisted_retailer_code.upper() if ff.assisted_retailer_code else ""] = ff
+    
+    # RSO রিপোর্ট - ফরম্যাট: "R591412 (366): ২টি"
+    rso_lines = []
+    rso_total = 0
+    for idx, rso in enumerate(rso_assignments, 1):
+        code = rso.retailer_code.upper()
+        count = activation_map.get(code, 0)
+        rso_total += count
+        
+        ff = field_force_map.get(code)
+        if ff:
+            # RSO ফরম্যাট: কোড (আইটপ/পুল): কাউন্ট
+            suffix = ff.itop_number or ff.pool_number or ""
+            display = f"{rso.retailer_code} ({suffix})" if suffix else rso.retailer_code
+        else:
+            display = rso.retailer_code
+        
+        rso_lines.append(f" {bn_num(idx)} {display}: {bn_num(count)}টি")
+    rso_section = "\n".join(rso_lines) if rso_lines else "কোনো RSO নেই"
+    
+    # BP রিপোর্ট - ফরম্যাট: "Sher Ali-R591989: ৬টি"
+    bp_lines = []
+    bp_total = 0
+    for idx, bp in enumerate(bp_assignments, 1):
+        code = bp.retailer_code.upper()
+        count = activation_map.get(code, 0)
+        bp_total += count
+        
+        ff = field_force_map.get(code)
+        if ff:
+            # BP ফরম্যাট: নাম-কোড: কাউন্ট
+            display = f"{ff.name}-{bp.retailer_code}"
+        else:
+            display = bp.retailer_code
+        
+        bp_lines.append(f" {bn_num(idx)} {display}: {bn_num(count)}টি")
+    bp_section = "\n".join(bp_lines) if bp_lines else "কোনো BP নেই"
+    
+    # Retailer রিপোর্ট - ফরম্যাট: "Alaina Telecom (102): ০টি"
+    retailer_lines = []
+    retailer_total = 0
+    for idx, ret in enumerate(retailer_assignments, 1):
+        code = ret.retailer_code.upper()
+        count = activation_map.get(code, 0)
+        retailer_total += count
+        
+        ff = field_force_map.get(code)
+        if ff:
+            # Retailer ফরম্যাট: নাম (কোড): কাউন্ট
+            display = f"{ff.name} ({ret.retailer_code})"
+        else:
+            display = ret.retailer_code
+        
+        retailer_lines.append(f" {bn_num(idx)} {display}: {bn_num(count)}টি")
+    retailer_section = "\n".join(retailer_lines) if retailer_lines else "কোনো রিটেইলার নেই"
+    
+    # সর্বমোট জিএ
+    total_ga = rso_total + bp_total + retailer_total
+    
+    # ফরম্যাটেড রিপোর্ট - ইউজারের উদাহরণ অনুযায়ী
+    report = f"""
+** মেলা রিপোর্ট **
+---------------------------
+🏗 ধরণ: {mela_type}
+🎯 কাজ: {mela_activity}
+🏘 থানা: {thana}
+📍 লোকেশন: {location}
+
+📡 বিটিএস কোডসমূহ:
+{bts_text}
+
+👥 অংশগ্রহণকারী মেম্বার:
+🔹 আরএসও ({len(rso_assignments)} জন):
+{rso_section}
+-------------------------------------
+মোটঃ {bn_num(rso_total)}টি
+
+🔹 বিপি ({len(bp_assignments)} জন):
+{bp_section}
+------------------------------------
+মোটঃ {bn_num(bp_total)}টি
+
+🔹 রিটেইলার ({len(retailer_assignments)} জন):
+{retailer_section}
+-----------------------------------
+মোটঃ {bn_num(retailer_total)}টি
+
+আজকের মেলার সর্বমোট জিএঃ {bn_num(total_ga)}টি
+"""
+    return report
