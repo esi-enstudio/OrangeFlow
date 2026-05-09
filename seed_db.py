@@ -51,7 +51,8 @@ async def seed_data():
             "manage_role_and_permission_list",
             "manage_ga_filter",
             "manage_data_center",
-            "manage_mela_settings"
+            "manage_mela_settings",
+            "manage_settings",
         ]
         
         db_perms = {}

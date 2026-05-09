@@ -24,10 +24,14 @@ def get_admin_main_menu(permissions: list):
     
     # ৩য় রো: ফিল্ড ফোর্স এবং রিটেইলার
     row3 = []
-    if "manage_field_force" in permissions: 
-        row3.append(KeyboardButton(text="👥 ফিল্ড ফোর্স"))
-    if "manage_retailers" in permissions: 
-        row3.append(KeyboardButton(text="🏪 রিটেইলারস"))
+    ff_perms = ["create_field_force","view_field_force","edit_field_force","delete_field_force",]
+    if any(p in permissions for p in ff_perms):
+        row4.append(KeyboardButton(text="👥 ফিল্ড ফোর্স"))
+
+    ret_perms = ["create_retailers","view_retailers","edit_retailers","delete_retailers",]
+    if any(p in permissions for p in ret_perms):
+        row4.append(KeyboardButton(text="🏪 রিটেইলারস"))
+
     if row3: 
         buttons.append(row3)
     
