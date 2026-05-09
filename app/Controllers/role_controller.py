@@ -29,7 +29,7 @@ class PermCreateForm(StatesGroup):
 
 
 # --- ১. পারমিশন তৈরি ---
-@router.message(F.text == "➕ নতুন পারমিশন তৈরি", flags={"permission": "manage_settings"})
+@router.message(F.text == "➕ নতুন পারমিশন", flags={"permission": "create_new_permission"})
 async def start_perm_creation(message: Message, state: FSMContext):
     await state.clear()
     if int(message.from_user.id) == SUPER_ADMIN_ID:
@@ -48,7 +48,7 @@ async def save_permission(message: Message, state: FSMContext):
 
 
 # --- ২. রোল তৈরি ও পারমিশন সিলেকশন কিবোর্ড ---
-@router.message(F.text == "➕ নতুন রোল তৈরি", flags={"permission": "manage_settings"})
+@router.message(F.text == "➕ নতুন রোল", flags={"permission": "create_new_role"})
 async def start_role_creation(message: Message, state: FSMContext):
     # চেক করা হচ্ছে কোনো ফ্ল্যাগ আছে কি না
     data = await state.get_data()
@@ -162,7 +162,7 @@ async def save_role_final(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # --- ১. রোল ও পারমিশন লিস্ট (আপডেটেড উইথ ইনলাইন বাটন) ---
-@router.message(F.text == "📋 রোল ও পারমিশন লিস্ট", flags={"permission": "manage_settings"})
+@router.message(F.text == "📋 রোল ও পারমিশন লিস্ট", flags={"permission": "manage_role_and_permission_list"})
 async def show_roles_and_permissions(message: Message):
     async with async_session() as session:
         roles = (await session.execute(select(Role).options(selectinload(Role.permissions)))).scalars().all()
@@ -335,60 +335,6 @@ async def delete_permission(callback: CallbackQuery):
 async def refresh_roles(callback: CallbackQuery):
     await callback.message.delete()
     await show_roles_and_permissions(callback.message)
-
-
-
-
-# @router.message(F.text == "📋 রোল ও পারমিশন লিস্ট", flags={"permission": "manage_settings"})
-# async def show_roles_and_permissions(message: Message):
-#     async with async_session() as session:
-#         # ১. সব রোল এবং তাদের পারমিশন লোড করা
-#         roles_result = await session.execute(
-#             select(Role).options(selectinload(Role.permissions))
-#         )
-#         roles = roles_result.scalars().all()
-
-#         # ২. সব আলাদা পারমিশন লোড করা (সিস্টেমে মোট কয়টি আছে দেখার জন্য)
-#         perms_result = await session.execute(select(Permission))
-#         all_permissions = perms_result.scalars().all()
-
-#         if not roles and not all_permissions:
-#             return await message.answer("⚠️ সিস্টেমে কোনো রোল বা পারমিশন তৈরি করা নেই।")
-
-#         # ৩. মেসেজ ফরমেটিং
-#         response = "🔐 **সিস্টেম এক্সেস কন্ট্রোল লিস্ট**\n"
-#         response += "━━━━━━━━━━━━━━━━━━━━\n\n"
-
-#         # রোল ও তাদের পারমিশন সেকশন
-#         response += "🎭 **রোল ভিত্তিক পারমিশন:**\n"
-#         if roles:
-#             for r in roles:
-#                 p_list = ", ".join([f"`{p.name}`" for p in r.permissions]) if r.permissions else "_কোনো পারমিশন নেই_"
-#                 response += f"🔹 **{r.name}**\n┗ 🛠 {p_list}\n\n"
-#         else:
-#             response += "_কোনো রোল নেই_\n\n"
-
-#         response += "────────────────────\n"
-        
-#         # সব পারমিশনের লিস্ট সেকশন
-#         response += "🔑 **সিস্টেমের সকল পারমিশন:**\n"
-#         if all_permissions:
-#             p_names = ", ".join([f"`{p.name}`" for p in all_permissions])
-#             response += f"⚙️ {p_names}\n"
-#         else:
-#             response += "_কোনো পারমিশন তৈরি করা নেই_"
-
-#         await message.answer(response, parse_mode="Markdown")
-
-
-
-
-
-
-
-
-
-
 
 
 # এই বাটনটি হ্যান্ডেল করার জন্য নতুন ফাংশন

@@ -81,19 +81,30 @@ async def cmd_start(message: Message, state: FSMContext, permissions: list = Non
         parse_mode="Markdown"
     )
 
-@router.message(F.text == "⚙️ সেটিংস", flags={"permission": "manage_settings"})
+@router.message(F.text == "⚙️ সেটিংস") # এখান থেকে flags={"permission": "..."} সরিয়ে ফেলুন
 async def settings_menu(message: Message, permissions: list):
-    if int(message.from_user.id) == int(SUPER_ADMIN_ID) or "manage_settings" in permissions:
-
+    """
+    ইউজার যখন সেটিংস বাটনে ক্লিক করবে। 
+    বাটনটি তখনই দৃশ্যমান হয় যখন ইউজারের কাছে নিচের যেকোনো একটি পারমিশন থাকে।
+    """
+    from app.Views.keyboards.reply import get_settings_menu
+    
+    # আমরা এখানে একটি বাড়তি নিরাপত্তা চেক রাখতে পারি (ঐচ্ছিক)
+    setting_perms = [
+        "create_new_role", "create_new_permission", 
+        "manage_role_and_permission_list", "manage_ga_filter", 
+        "manage_data_center", "manage_mela_settings"
+    ]
+    
+    # যদি সুপার এডমিন হয় অথবা অন্তত একটি সেটিংস পারমিশন থাকে
+    if int(message.from_user.id) == int(SUPER_ADMIN_ID) or any(p in permissions for p in setting_perms):
         await message.answer(
-            f"⚙️ **সিস্টেম সেটিংস**\n\n"
-            f"👑 সুপার এডমিন আইডি: `{SUPER_ADMIN_ID}`\n"
-            f"🤖 বট স্ট্যাটাস: অনলাইন ✅\n"
-            f"📅 আজকের তারিখ: {datetime.now().strftime('%d-%m-%Y')}",
-            # এখানে permissions পাস করুন
-            reply_markup=get_settings_menu(permissions), 
-            parse_mode="Markdown"
+            "⚙️ <b>সিস্টেম সেটিংস মেনু</b>\n\nআপনার অনুমতি অনুযায়ী অপশনগুলো নিচে দেওয়া হলো:",
+            reply_markup=get_settings_menu(permissions),
+            parse_mode="HTML"
         )
+    else:
+        await message.answer("🚫 দুঃখিত, এই মেনুতে আপনার প্রবেশের অনুমতি নেই।")
 
 @router.message(F.text == "🔙 প্রধান মেনু")
 async def back_to_main(message: Message, state: FSMContext, permissions: list):

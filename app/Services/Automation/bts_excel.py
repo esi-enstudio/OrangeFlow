@@ -7,10 +7,7 @@ from app.Services.db_service import async_session
 BTS_MAP = {
     'SITE ID': 'site_id', 'BTS CODE': 'bts_code', 'SITE TYPE': 'site_type',
     'THANA': 'thana', 'THANA BN': 'thana_bn', 'DISTRICT': 'district',
-    'DISTRICT BN': 'district_bn', 'DIVISION': 'division', 'DIVISION BN': 'division_bn',
-    'CLUSTER': 'cluster', 'CLUSTER BN': 'cluster_bn', 'REGION': 'region',
-    'REGION BN': 'region_bn', 'NETWORK MODE': 'network_mode', 'ADDRESS': 'address',
-    'ADDRESS BN': 'address_bn', 'SHORT ADDRESS': 'short_address', 'LONGITUDE': 'longitude',
+    'DISTRICT BN': 'district_bn', 'DIVISION': 'division', 'DIVISION BN': 'division_bn', 'CLUSTER': 'cluster', 'CLUSTER BN': 'cluster_bn', 'REGION': 'region', 'REGION BN': 'region_bn', 'NETWORK MODE': 'network_mode', 'ADDRESS': 'address', 'ADDRESS BN': 'address_bn', 'SHORT ADDRESS': 'short_address', 'SHORT ADDRESS BN': 'short_address_bn', 'LONGITUDE': 'longitude',
     'LATITUDE': 'latitude', 'ARCHETYPE': 'archetype', 'MARKET': 'market',
     'DISTRIBUTOR CODE': 'distributor_code', '2GONAIRDATE': 'onair_date_2g',
     '3GONAIRDATE': 'onair_date_3g', '4GONAIRDATE': 'onair_date_4g',
@@ -23,9 +20,7 @@ async def generate_bts_sample(file_path):
     headers = [
         'SITE ID', 'BTS CODE', 'SITE TYPE', 'THANA', 'THANA BN', 'DISTRICT',
         'DISTRICT BN', 'DIVISION', 'DIVISION BN', 'CLUSTER', 'CLUSTER BN', 'REGION',
-        'REGION BN', 'NETWORK MODE', 'ADDRESS', 'ADDRESS BN', 'SHORT ADDRESS', 'LONGITUDE',
-        'LATITUDE', 'ARCHETYPE', 'MARKET', 'DISTRIBUTOR CODE', '2GONAIRDATE',
-        '3GONAIRDATE', '4GONAIRDATE', 'URBAN_RURAL', 'PRIORITY'
+        'REGION BN', 'NETWORK MODE', 'ADDRESS', 'ADDRESS BN', 'SHORT ADDRESS', 'SHORT ADDRESS BN', 'LONGITUDE', 'LATITUDE', 'ARCHETYPE', 'MARKET', 'DISTRIBUTOR CODE', '2GONAIRDATE', '3GONAIRDATE', '4GONAIRDATE', 'URBAN_RURAL', 'PRIORITY'
     ]
     
     # একটি খালি ডাটাফ্রেম তৈরি করে এক্সেল হিসেবে সেভ করা

@@ -17,11 +17,11 @@ from app.Services.Automation.Reports.ga_live import run_ga_live_sync, reset_dail
 
 # কন্ট্রোলার ইম্পোর্ট
 from app.Controllers import (
-    admin_controller, house_controller, user_controller,
+    activation_controller, admin_controller, house_controller, user_controller,
     role_controller, automation_controller, sim_status_controller,
     sim_return_controller, sim_issue_controller, ga_live_controller,
     field_force_controller, retailer_controller, ga_filter_controller,
-    bts_controller,
+    bts_controller, mela_config_controller, mela_controller,
 )
 
 # --- ২. লগিং কনফিগারেশন (সাইলেন্ট মুড) ---
@@ -125,7 +125,8 @@ async def main():
         sim_return_controller.router, sim_issue_controller.router,
         ga_live_controller.router, field_force_controller.router,
         retailer_controller.router, ga_filter_controller.router,
-        bts_controller.router,
+        bts_controller.router, mela_config_controller.router,
+        activation_controller.router, mela_controller.router
     )
 
     # পেন্ডিং মেসেজ স্কিপ করা

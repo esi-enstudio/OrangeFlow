@@ -8,7 +8,7 @@ from app.Models.role import Role, Permission
 
 async def seed_data():
     async with async_session() as session:
-        print("🚀 ডাটা সিডিং শুরু হচ্ছে...")
+        print("Data seeding started...")
 
         # --- ১. পারমিশন সিডিং ---
         permissions_list = [
@@ -19,7 +19,6 @@ async def seed_data():
             "create_user",
             "edit_user",
             "delete_user",
-            "manage_settings", 
             "itopup_replace",
             "dms_access",
             "sim_status_check", 
@@ -33,8 +32,6 @@ async def seed_data():
             "edit_field_force",
             "delete_field_force",
             "manage_field_force",
-            "manage_mela",
-            "manage_bts",
             "upload_retailer_excel",
             "manage_retailers",
             "create_retailers",
@@ -45,6 +42,16 @@ async def seed_data():
             "view_bts",
             "edit_bts",
             "delete_bts",
+            "create_mela",
+            "view_mela",
+            "edit_mela",
+            "delete_mela",
+            "create_new_role",
+            "create_new_permission",
+            "manage_role_and_permission_list",
+            "manage_ga_filter",
+            "manage_data_center",
+            "manage_mela_settings"
         ]
         
         db_perms = {}
@@ -57,7 +64,7 @@ async def seed_data():
             db_perms[p_name] = perm
         
         await session.flush() 
-        print("✅ পারমিশন সিডিং সম্পন্ন।")
+        print("[OK] Permission seeding completed.")
 
         # --- ২. রোল সিডিং ---
         roles_list = ["Manager", "Zonal Manager", "Distributor", "Supervisor", "Rso", "Bp", "Accoutant", "DMS Operator"]
@@ -74,7 +81,7 @@ async def seed_data():
             db_roles[r_name] = role
         
         await session.flush()
-        print("✅ রোল সিডিং সম্পন্ন।")
+        print("[OK] Role seeding completed.")
 
         # --- ৩. হাউজ সিডিং ---
         houses_to_create = [
@@ -111,7 +118,7 @@ async def seed_data():
             db_houses_map[h_data['code']] = house
         
         await session.flush()
-        print("✅ হাউজ সিডিং সম্পন্ন।")
+        print("[OK] House seeding completed.")
 
         # --- ৪. ইউজার সিডিং ---
         # এমিল (সুপার এডমিন হিসেবে তাকে Patwary Telecom এবং Modina Store দুটিতেই রাখা হলো)
@@ -153,8 +160,8 @@ async def seed_data():
                 session.add(user)
 
         await session.commit()
-        print("✅ ইউজার সিডিং সম্পন্ন।")
-        print("🏁 ডাটা সিডিং সফলভাবে শেষ হয়েছে!")
+        print("[OK] User seeding completed.")
+        print("[DONE] Data seeding finished successfully!")
 
 if __name__ == "__main__":
     asyncio.run(seed_data())

@@ -27,6 +27,7 @@ class BTS(Base):
     address = Column(String)                          # Address
     address_bn = Column(String)                       # Address Bn
     short_address = Column(String)                    # Short Address
+    short_address_bn = Column(String)
     longitude = Column(String)
     latitude = Column(String)
     archetype = Column(String)                        # Archetype

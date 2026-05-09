@@ -222,8 +222,12 @@ def get_bts_pagination_kb(items, offset, total, house_id, thana_name):
     """থানা ভিত্তিক পেজিনেশন কিবোর্ড ✅"""
     builder = InlineKeyboardBuilder()
     for b in items:
-        addr = b.short_address if b.short_address else "N/A"
-        builder.button(text=f"📡 {b.bts_code} ({addr})", callback_data=f"bts_view_{b.id}")
+        addr = b.short_address_bn if b.short_address_bn else (b.short_address if b.short_address else "N/A")
+        
+        builder.button(
+            text=f"📡 {b.bts_code} ({addr})", 
+            callback_data=f"bts_view_{b.id}"
+        )
     
     builder.adjust(1)
     

@@ -2,7 +2,7 @@ import os
 import unicodedata
 import asyncio
 import logging
-from aiogram import Router, F, types
+from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -15,7 +15,7 @@ from app.Models.user import User
 from app.Models.house import House
 from app.Services.db_service import async_session
 from app.Services.Automation.bts_excel import process_bts_excel, generate_bts_sample
-from app.Views.keyboards.inline import get_bts_pagination_kb, get_bts_search_results_kb
+from app.Views.keyboards.inline import get_bts_pagination_kb
 from app.Utils.helpers import bn_num
 from config.settings import SUPER_ADMIN_ID
 
@@ -67,9 +67,10 @@ def get_bts_full_profile_text(b: BTS):
         f"🔹 Urban/Rural: {clean(b.urban_rural)}\n"
         f"🔹 Archetype: {clean(b.archetype)}\n"
         f"🔹 Market: {clean(b.market)}\n"
-        f"🔹 Short Address: {clean(b.short_address)}\n"
+        f"🔹 Short Address (EN): {clean(b.short_address)}\n"
         f"🔹 Address EN: {clean(b.address)}\n"
         f"🔹 ঠিকানা (বাংলা): {clean(b.address_bn)}\n"
+        f"🔹 ঠিকানা (সংক্ষিপ্ত বাংলা): {clean(b.short_address_bn)}\n"
         f"🔹 Longitude: {clean(b.longitude)}\n"
         f"🔹 Latitude: {clean(b.latitude)}\n\n"
 
@@ -134,33 +135,56 @@ async def render_bts_dashboard(message: Message, house_id: int, permissions: lis
 # ==========================================
 # ১. থানা সিলেকশন মেনু
 @router.callback_query(F.data.startswith("bts_list_"))
-async def list_thana_selection(callback: CallbackQuery):
-    house_id = int(callback.data.split("_")[2])
-    
+async def list_thana_selection(event, house_id: int = None):
+    """
+    event: এটি CallbackQuery অথবা Message (রিডাইরেক্টের জন্য) হতে পারে।
+    house_id: রিডাইরেক্টের সময় সরাসরি আইডি পাস করা হয়।
+    """
+    # ১. ইভেন্টের ধরন অনুযায়ী ডাটা সংগ্রহ
+    if isinstance(event, CallbackQuery):
+        # বাটন ক্লিক করে আসলে
+        house_id = int(event.data.split("_")[2])
+        msg_obj = event.message
+    else:
+        # এক্সেল আপলোড শেষে রিডাইরেক্ট হয়ে আসলে
+        msg_obj = event
+
     async with async_session() as session:
-        # ওই হাউজের সব ইউনিক থানার নাম (বাংলায়) সংগ্রহ ✅
+        # ২. ওই হাউজের সব ইউনিক থানার নাম (বাংলা কলাম) সংগ্রহ ✅
         res = await session.execute(
-            select(BTS.thana_bn).where(BTS.house_id == house_id).distinct().order_by(BTS.thana_bn)
+            select(BTS.thana_bn)
+            .where(BTS.house_id == house_id, BTS.thana_bn != None)
+            .distinct()
+            .order_by(BTS.thana_bn)
         )
         thanas = res.scalars().all()
 
         if not thanas:
-            return await callback.answer("⚠️ কোনো ডাটা পাওয়া যায়নি।", show_alert=True)
+            error_text = "⚠️ এই হাউজে কোনো থানার ডাটা পাওয়া যায়নি। অনুগ্রহ করে এক্সেল আপলোড করুন।"
+            if isinstance(event, CallbackQuery):
+                return await event.answer(error_text, show_alert=True)
+            return await msg_obj.edit_text(error_text)
 
+        # ৩. থানা বাটন তৈরি
         builder = InlineKeyboardBuilder()
-        for thana in thanas:
-            t_name = thana if thana else "অজানা থানা"
-            # কলব্যাক ফরম্যাট: btsthana_{house_id}_{thana_name}
-            builder.button(text=f"📍 {t_name}", callback_data=f"btsthana:{house_id}:{t_name}")
+        for t_name in thanas:
+            # কলব্যাক ডাটা ফরম্যাট: btsthana:HOUSEID:THANANAME:OFFSET
+            builder.button(text=f"📍 {t_name}", callback_data=f"btsthana:{house_id}:{t_name}:0")
         
-        builder.adjust(2)
+        builder.adjust(2) # থানা বাটনগুলো ২ কলামে
         builder.row(InlineKeyboardButton(text="🔙 ব্যাকে যান", callback_data=f"bts_hsel_{house_id}"))
 
-        await callback.message.edit_text(
-            "🏘 <b>থানা নির্বাচন করুন:</b>\nনিচের কোন থানার বিটিএস তালিকা দেখতে চান?",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
+        text = "🏘 <b>থানা নির্বাচন করুন:</b>\nকোন থানার বিটিএস তালিকা দেখতে চান?"
+
+        # ৪. মেসেজ আপডেট (edit_text না পারলে answer করবে)
+        try:
+            await msg_obj.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        except Exception:
+            await msg_obj.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+    # যদি এটি কলব্যাক হয় তবে লোডিং আইকন বন্ধ করা
+    if isinstance(event, CallbackQuery):
+        await event.answer()
 
 # ২. নির্বাচিত থানার বিটিএস লিস্ট (পেজিনেশন সহ)
 @router.callback_query(F.data.startswith("btsthana:"))
@@ -251,7 +275,8 @@ async def show_bts_fields(callback: CallbackQuery):
         "net_addr": [
             ("Network Mode", "network_mode"), ("Urban/Rural", "urban_rural"), 
             ("Archetype", "archetype"), ("Market", "market"), 
-            ("Short Address", "short_address"), ("Address EN", "address"), 
+            ("Short Address", "short_address"), ("Short Addr (BN)", "short_address_bn"),
+            ("Address EN", "address"), 
             ("Address BN", "address_bn"), ("Longitude", "longitude"), ("Latitude", "latitude")
         ],
         "on_air": [
@@ -328,43 +353,39 @@ async def bts_upload_trigger(callback: CallbackQuery, state: FSMContext):
 async def handle_bts_excel(message: Message, state: FSMContext):
     data = await state.get_data()
     h_id = data.get('selected_house_id')
-    if not h_id: return await message.answer("❌ সেশন এরর! হাউজ পুনরায় সিলেক্ট করুন।")
+    if not h_id: 
+        return await message.answer("❌ সেশন এরর! হাউজ পুনরায় সিলেক্ট করুন।")
 
     file_path = f"temp_bts_{message.from_user.id}.xlsx"
     wait_msg = await message.answer("⏳ ফাইল প্রসেস শুরু হচ্ছে...")
     
     try:
+        # ফাইল ডাউনলোড করা
         await message.bot.download(message.document, destination=file_path)
         
+        # লাইভ প্রগ্রেস ফাংশন
         async def progress(text): 
             try: await wait_msg.edit_text(text)
             except: pass
         
+        # প্রসেসিং শুরু
         count, err = await process_bts_excel(file_path, h_id, progress)
         
         if err:
             await wait_msg.edit_text(f"❌ এরর: {err}")
         else:
-            # সফল হলে সাকসেস মেসেজ দিয়ে ৩ সেকেন্ড পর লিস্ট লোড করবে ✅
-            await wait_msg.edit_text(f"✅ সফল! {bn_num(count)}টি বিটিএস আপডেট হয়েছে।")
-            await asyncio.sleep(3)
+            # সফল হলে মেসেজ দিবে
+            await wait_msg.edit_text(f"✅ সফল! {bn_num(count)}টি বিটিএস ডাটাবেজে আপডেট হয়েছে।")
+            await asyncio.sleep(1)
             
-            # সরাসরি লিস্ট লোড করার লজিক
-            async with async_session() as session:
-                total = await session.scalar(select(func.count(BTS.id)).where(BTS.house_id == h_id))
-                res = await session.execute(select(BTS).where(BTS.house_id == h_id).limit(PAGE_LIMIT))
-                items = res.scalars().all()
-                total_pages = (total + PAGE_LIMIT - 1) // PAGE_LIMIT
-                
-                from app.Views.keyboards.inline import get_bts_pagination_kb
-                kb = get_bts_pagination_kb(items, 1, total_pages, h_id)
-                
-                await wait_msg.edit_text(f"📋 **সদ্য আপলোড হওয়া বিটিএস তালিকা** (মোট: {bn_num(total)}):", reply_markup=kb)
+            # সরাসরি থানা সিলেকশন মেনু লোড করা (এরর এড়াতে এটি সেরা পদ্ধতি) ✅
+            await list_thana_selection(wait_msg, house_id=h_id)
 
     except Exception as e:
         await wait_msg.edit_text(f"❌ একটি ত্রুটি হয়েছে: {str(e)}")
     finally:
-        if os.path.exists(file_path): os.remove(file_path)
+        if os.path.exists(file_path): 
+            os.remove(file_path)
         await state.clear()
 
 # হাউজ পরিবর্তন
@@ -442,6 +463,7 @@ async def process_bts_search(message: Message, state: FSMContext):
                     BTS.site_id.ilike(search_pattern),
                     BTS.address.ilike(search_pattern),
                     BTS.address_bn.ilike(search_pattern),
+                    BTS.short_address_bn.ilike(search_pattern),
                     BTS.thana.ilike(search_pattern),
                     BTS.thana_bn.ilike(search_pattern)
                 )

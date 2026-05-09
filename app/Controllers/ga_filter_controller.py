@@ -65,7 +65,7 @@ async def handle_gaf_house_logic(message: Message, state: FSMContext, user_tg_id
 
 
 # --- এন্ট্রি পয়েন্ট (Reply Keyboard) ---
-@router.message(F.text == "⚙️ জিএ ফিল্টার", flags={"permission": "manage_settings"})
+@router.message(F.text == "⚙️ জিএ ফিল্টার", flags={"permission": "manage_ga_filter"})
 async def ga_filter_start(message: Message, state: FSMContext):
     await state.clear()
     # এখানে message.from_user.id সঠিক ✅

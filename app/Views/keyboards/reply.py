@@ -35,7 +35,8 @@ def get_admin_main_menu(permissions: list):
     row4 = []
     
     # মেলা ম্যানেজমেন্ট চেক
-    if "manage_mela" in permissions: 
+    mela_perms = ["create_mela", "view_mela", "edit_mela", "delete_mela"]
+    if any(p in permissions for p in mela_perms):
         row4.append(KeyboardButton(text="🎪 মেলা ম্যানেজমেন্ট"))
     
     # বিটিএস লিস্ট চেক (যেকোনো একটি পারমিশন থাকলে বাটন আসবে) ✅
@@ -46,14 +47,17 @@ def get_admin_main_menu(permissions: list):
     if row4: 
         buttons.append(row4)
     
-    # ৫তম রো: সেটিংস (একাকী)
-    if "manage_settings" in permissions:
+    # ৫তম রো: সেটিংস (যদি পারমিশন থাকে) ✅
+    # যদি নিচের যেকোনো একটি পারমিশন থাকে তবেই সেটিংস বাটন দেখাবে
+    setting_perms = [
+        "create_new_role", "create_new_permission", 
+        "manage_role_and_permission_list", "manage_ga_filter", 
+        "manage_data_center", "manage_mela_settings"
+    ]
+
+    if any(p in permissions for p in setting_perms):
         buttons.append([KeyboardButton(text="⚙️ সেটিংস")])
         
-    # যদি কোনো পারমিশন না থাকে
-    if not buttons:
-        return None
-    
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
@@ -61,8 +65,43 @@ def get_admin_main_menu(permissions: list):
 
 
 
+def get_settings_menu(permissions: list):
+    """সেটিংস সাব-মেনু (নির্দিষ্ট পারমিশন ভিত্তিক)"""
+    buttons = []
+
+    # রো ১: নতুন রোল ও পারমিশন
+    row1 = []
+    if "create_new_role" in permissions: row1.append(KeyboardButton(text="➕ নতুন রোল"))
+    if "create_new_permission" in permissions: row1.append(KeyboardButton(text="➕ নতুন পারমিশন"))
+    if row1: buttons.append(row1)
+
+    # রো ২: লিস্ট ও জিএ ফিল্টার
+    row2 = []
+    if "manage_role_and_permission_list" in permissions: row2.append(KeyboardButton(text="📋 রোল ও পারমিশন লিস্ট"))
+    if "manage_ga_filter" in permissions: row2.append(KeyboardButton(text="⚙️ জিএ ফিল্টার"))
+    if row2: buttons.append(row2)
+
+    # রো ৩: ডাটা সেন্টার ও মেলা সেটিংস
+    row3 = []
+    if "manage_data_center" in permissions: row3.append(KeyboardButton(text="💾 ডাটা সেন্টার"))
+    if "manage_mela_settings" in permissions: row3.append(KeyboardButton(text="⚙️ মেলার সেটিংস"))
+    if row3: buttons.append(row3)
+
+    buttons.append([KeyboardButton(text="🔙 প্রধান মেনু")])
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
+def get_data_center_menu(permissions: list):
+    """ডাটা সেন্টার সাব-মেনু (এক্সেল আপলোডের জন্য) ✅"""
+    buttons = []
+    
+    # এখানে আপনার ৬টি টেবিলের বাটন আসবে। আপাতত 'এক্টিভেশন' শুরু করছি।
+    if "manage_data_center" in permissions:
+        buttons.append([KeyboardButton(text="📈 এক্টিভেশন")])
+        # ভবিষ্যতে এখানে বাকি ৫টি বাটন যোগ হবে
+    
+    buttons.append([KeyboardButton(text="🔙 প্রধান মেনু")])
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
 
@@ -149,8 +188,6 @@ def get_user_mgmt_menu(permissions: list):
 
 
 
-
-
 def get_ff_mgmt_menu(permissions: list):
     """ফিল্ড ফোর্স ম্যানেজমেন্ট সাব-মেনু (নতুন)"""
     buttons = []
@@ -184,23 +221,33 @@ def get_retailer_mgmt_menu(permissions: list):
 
 
 
-
-def get_settings_menu(permissions: list):
-    """সেটিংস সাব-মেনু (রোল, পারমিশন এবং জিএ ফিল্টার)"""
+def get_mela_settings_menu(permissions: list):
+    """মেলার সেটিংস সাব-মেনু (Reply Keyboard) ✅"""
     buttons = []
-
-    if "manage_settings" in permissions:
-        # রোল ও পারমিশন
+    
+    if "manage_mela_settings" in permissions:
+        # ১ম রো: ধরণ এবং এক্টিভিটি
         buttons.append([
-            KeyboardButton(text="➕ নতুন রোল"), 
-            KeyboardButton(text="➕ নতুন পারমিশন")
+            KeyboardButton(text="➕ নতুন মেলার ধরণ"),
+            KeyboardButton(text="➕ নতুন এক্টিভিটি")
         ])
-
-        # লিস্ট ও ফিল্টার
+        
+        # ২য় রো: এলিজিবল বিটিএস
         buttons.append([
-            KeyboardButton(text="📋 রোল ও পারমিশন লিস্ট"), 
-            KeyboardButton(text="⚙️ জিএ ফিল্টার")
+            KeyboardButton(text="📤 এলিজিবল বিটিএস আপলোড")
         ])
     
+    # সব সময় প্রধান মেনুতে ফেরার বাটন থাকবে
     buttons.append([KeyboardButton(text="🔙 প্রধান মেনু")])
+    
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+
+
+
+
+
+
+
+
+

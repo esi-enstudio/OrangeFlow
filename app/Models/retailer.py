@@ -38,7 +38,7 @@ class Retailer(Base):
     # হাউজের সাথে রিলেশন
     house = relationship("House", back_populates="retailers")
 
-    # রিলেশন: এই রিটেইলারের অধীনে কতগুলো লাইভ এক্টিভেশন আছে
-    activations = relationship("LiveActivation", back_populates="retailer")
-
+    # রিলেশন:
+    activations = relationship("Activation", back_populates="retailer")
+    live_activations = relationship("LiveActivation", back_populates="retailer")
     field_force = relationship("FieldForce", back_populates="retailers")

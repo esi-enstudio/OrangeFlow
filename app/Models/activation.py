@@ -1,26 +1,26 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.Models.base import Base
 
-class LiveActivation(Base):
-    __tablename__ = "live_activations"
+class Activation(Base):
+    __tablename__ = "activations"
 
     id = Column(Integer, primary_key=True)
     house_id = Column(Integer, ForeignKey('houses.id'), nullable=False)
     retailer_id = Column(Integer, ForeignKey('retailers.id'), nullable=True)
     
-    # activation data columns
-    activation_date = Column(String)
+    # সকল কলাম (লাইভ এক্টিভেশনের মতো)
+    activation_date = Column(Date, index=True) # ক্যালকুলেশনের জন্য Date টাইপ ✅
     activation_time = Column(String)
-    retailer_code = Column(String)
+    retailer_code = Column(String, index=True)
     retailer_name = Column(String)
     bts_code = Column(String)
     thana = Column(String)
     promotion = Column(String)
     product_code = Column(String)
     product_name = Column(String)
-    sim_no = Column(String, unique=True, index=True) # Unique ID for comparison
+    sim_no = Column(String, unique=True, index=True) # ইউনিক আইডেন্টিফায়ার
     msisdn = Column(String)
     selling_price = Column(String)
     bp_flag = Column(String)
@@ -34,6 +34,7 @@ class LiveActivation(Base):
     customer_second_contact = Column(String)
     
     created_at = Column(DateTime, server_default=func.now())
-
+    updated_at = Column(DateTime, onupdate=func.now())
+    
     house = relationship("House")
-    retailer = relationship("Retailer", back_populates="live_activations")
+    retailer = relationship("Retailer", back_populates="activations")
