@@ -1,6 +1,6 @@
 import asyncio
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -96,13 +96,24 @@ async def user_mgmt_menu(message: Message, permissions: list):
         reply_markup=get_user_mgmt_menu(permissions) # এখানে permissions পাস করুন ✅
     )
 
-@router.message(F.text == "📋 ইউজার লিস্ট দেখুন", flags={"permission": "view_users"})
-async def show_user_list(message: Message):
+async def show_user_list(message: Message, offset: int = 0, limit: int = 5):
+    """ইউজার লিস্ট পেজিনেশন সহ দেখাবে।"""
     async with async_session() as session:
-        result = await session.execute(select(DBUser).options(selectinload(DBUser.houses)))
+        # মোট ইউজার সংখ্যা
+        total_result = await session.execute(select(DBUser))
+        total_users = total_result.scalars().all()
+        total_count = len(total_users)
+        
+        # পেজিনেটেড ইউজার ফেচ
+        result = await session.execute(
+            select(DBUser)
+            .options(selectinload(DBUser.houses))
+            .offset(offset)
+            .limit(limit)
+        )
         users = result.scalars().all()
 
-        if not users: 
+        if not users:
             return await message.answer("⚠️ কোনো ইউজার নেই।")
             
         builder = InlineKeyboardBuilder()
@@ -114,14 +125,42 @@ async def show_user_list(message: Message):
             builder.button(text=f"👤 {u.name} ({h_info})", callback_data=f"manage_u_{u.id}")
 
         builder.adjust(1)
-        await message.answer("👥 নিবন্ধিত ইউজার তালিকা:", reply_markup=builder.as_markup())
+        
+        # নেভিগেশন বাটন
+        nav_buttons = []
+        if offset > 0:
+            nav_buttons.append(("⬅️ পূর্ববর্তী", f"userlist_page_{max(0, offset - limit)}"))
+        if offset + limit < total_count:
+            nav_buttons.append(("➡️ পরবর্তী", f"userlist_page_{offset + limit}"))
+        
+        if nav_buttons:
+            row = []
+            for text, data in nav_buttons:
+                row.append(InlineKeyboardButton(text=text, callback_data=data))
+            builder.row(*row)
+        
+        await message.answer(f"👥 নিবন্ধিত ইউজার তালিকা (পৃষ্ঠা {offset//limit + 1}):", reply_markup=builder.as_markup())
+
+@router.message(F.text == "📋 ইউজার লিস্ট দেখুন", flags={"permission": "view_users"})
+async def handle_user_list(message: Message):
+    await show_user_list(message, offset=0)
+
+@router.callback_query(F.data.startswith("userlist_page_"))
+async def handle_userlist_page(callback: CallbackQuery):
+    offset = int(callback.data.split("_")[2])
+    try:
+        await callback.message.delete()
+    except:
+        pass
+    await show_user_list(callback.message, offset=offset)
+    await callback.answer()
 
 @router.callback_query(F.data == "back_to_ulist")
 async def back_to_user_list(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     try: await callback.message.delete()
     except: pass
-    await show_user_list(callback.message)
+    await show_user_list(callback.message, offset=0)
     await callback.answer()
 
 
