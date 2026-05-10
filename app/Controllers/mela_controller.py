@@ -543,7 +543,10 @@ async def show_ret_multi(event, state: FSMContext):
         text = f"🏬 <b>রিটেইলার নির্বাচন করুন:</b> ({bn_num(total)} জন)\n"
         text += "শুধুমাত্র সিম সেলার (sim_seller = 'Y') রিটেইলার দেখানো হচ্ছে।\n"
         text += "সিলেকশন শেষ হলে সেভ বাটনে ক্লিক করুন।"
-        await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        if isinstance(event, Message):
+            await event.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        else:
+            await event.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await state.set_state(MelaWizard.retailer)
 
 @router.callback_query(MelaWizard.retailer, F.data.startswith(("mtog_ret:", "mnav_ret:")))
@@ -564,8 +567,10 @@ async def handle_ret_action(callback: CallbackQuery, state: FSMContext):
 async def manual_retailer_add(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         "📝 <b>রিটেইলার কোড লিখুন:</b>\n"
-        "রিটেইলারের কোডটি ইনপুট দিন (যেমন: R123456)।\n"
-        "এই রিটেইলারটি ডাটাবেসে থাকতে হবে এবং শর্ত পূরণ না করলেও যোগ করা যাবে।",
+        "একটি বা একাধিক কোড দিতে পারেন।\n"
+        "• কমা দিয়ে: <code>R123456, R234567, R345678</code>\n"
+        "• প্রতি লাইনে: <code>R123456\nR234567\nR345678</code>\n"
+        "রিটেইলার ডাটাবেসে থাকতে হবে।",
         parse_mode="HTML"
     )
     await state.set_state(MelaWizard.manual_retailer)
@@ -573,33 +578,56 @@ async def manual_retailer_add(callback: CallbackQuery, state: FSMContext):
 
 @router.message(MelaWizard.manual_retailer)
 async def handle_manual_retailer_code(message: Message, state: FSMContext):
-    retailer_code = message.text.strip()
-    if not retailer_code:
+    input_text = message.text.strip()
+    if not input_text:
         await message.answer("❌ রিটেইলার কোড খালি থাকতে পারে না। আবার চেষ্টা করুন:")
         return
-    
+
+    # কমা বা নিউলাইন দিয়ে কোড আলাদা করুন (বড় অক্ষরে রূপান্তর)
+    codes = [c.strip().upper() for c in input_text.replace('\n', ',').split(',') if c.strip()]
+    if not codes:
+        await message.answer("❌ কোনো রিটেইলার কোড পাওয়া যায়নি। আবার চেষ্টা করুন:")
+        return
+
     async with async_session() as session:
-        # রিটেইলার খুঁজে বের করুন
-        retailer = await session.execute(
-            select(Retailer).where(Retailer.retailer_code == retailer_code)
+        # সব কোড খুঁজে বের করুন (case-insensitive)
+        lower_codes = [c.lower() for c in codes]
+        retailers = await session.execute(
+            select(Retailer).where(func.lower(Retailer.retailer_code).in_(lower_codes))
         )
-        retailer = retailer.scalar_one_or_none()
-        
-        if not retailer:
-            await message.answer(f"❌ রিটেইলার কোড <code>{retailer_code}</code> ডাটাবেসে পাওয়া যায়নি। আবার চেষ্টা করুন:", parse_mode="HTML")
-            return
-        
+        found_map = {r.retailer_code.upper() if r.retailer_code else "": r for r in retailers.scalars().all()}
+
         # বর্তমান নির্বাচিত রিটেইলার আইডি গুলো নিন
         data = await state.get_data()
         selected_ids = list(data.get('ret_ids', []))
-        
-        if retailer.id in selected_ids:
-            await message.answer(f"ℹ️ রিটেইলার <code>{retailer_code}</code> ইতিমধ্যেই নির্বাচিত আছে।", parse_mode="HTML")
-        else:
-            selected_ids.append(retailer.id)
-            await state.update_data(ret_ids=selected_ids)
-            await message.answer(f"✅ রিটেইলার <code>{retailer_code}</code> সফলভাবে যোগ করা হয়েছে।", parse_mode="HTML")
-        
+
+        added = []
+        not_found = []
+        already_selected = []
+
+        for code in codes:
+            retailer = found_map.get(code)
+            if not retailer:
+                not_found.append(code)
+            elif retailer.id in selected_ids:
+                already_selected.append(code)
+            else:
+                selected_ids.append(retailer.id)
+                added.append(code)
+
+        await state.update_data(ret_ids=selected_ids)
+
+        # রেসপন্স মেসেজ তৈরি
+        response_parts = []
+        if added:
+            response_parts.append(f"✅ যোগ করা হয়েছে ({len(added)}টি): " + ", ".join(added))
+        if already_selected:
+            response_parts.append(f"ℹ️ ইতিমধ্যে আছে ({len(already_selected)}টি): " + ", ".join(already_selected))
+        if not_found:
+            response_parts.append(f"❌ পাওয়া যায়নি ({len(not_found)}টি): " + ", ".join(not_found))
+
+        await message.answer("\n".join(response_parts), parse_mode="HTML")
+
         # রিটেইলার সিলেকশন পেজে ফিরে যান
         await show_ret_multi(message, state)
 
