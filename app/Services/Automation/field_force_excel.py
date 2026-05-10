@@ -40,12 +40,18 @@ async def process_field_force_excel(file_path, house_id, progress_callback=None)
         if total_rows == 0: return 0, "ফাইলটিতে কোনো ডাটা পাওয়া যায়নি।"
 
         # ২. ক্লিন ফাংশন
-        def clean_val(val):
-            if pd.isna(val): 
+        def clean_val(val, col_name=None):
+            if pd.isna(val):
                 return None
             v = str(val).strip()
             if v == "" or v.lower() in ["nan", "none", "null"]:
                 return None
+
+            # তারিখ কলাম হলে শুধু তারিখ অংশ রাখুন (সময় বাদ দিন)
+            if col_name in ['JOINING_DATE', 'RESIGNED_DATE', 'DOB']:
+                if ' ' in v and ':' in v:
+                    v = v.split(' ')[0]  # "2024-08-01 00:00:00" থেকে "2024-08-01"
+
             return v
 
         async with async_session() as session:
@@ -95,15 +101,15 @@ async def process_field_force_excel(file_path, house_id, progress_callback=None)
                     "fathers_name": clean_val(row.get('FATHERS_NAME')),
                     "mothers_name": clean_val(row.get('MOTHERS_NAME')),
                     "religion": clean_val(row.get('RELIGION')),
-                    "dob": clean_val(row.get('DOB')),
+                    "dob": clean_val(row.get('DOB'), 'DOB'),
                     "nid": clean_val(row.get('NID')),
                     "previous_company_name": clean_val(row.get('PREVIOUS_COMPANY_NAME')),
                     "previous_company_salary": clean_val(row.get('PREVIOUS_COMPANY_SALARY')),
                     "motor_bike": clean_val(row.get('MOTOR_BIKE')),
                     "bicyle": clean_val(row.get('BICYCLE')),
                     "driving_license": clean_val(row.get('DRIVING_LICENSE')),
-                    "joining_date": clean_val(row.get('JOINING_DATE')),
-                    "resigned_date": clean_val(row.get('RESIGNED_DATE')),
+                    "joining_date": clean_val(row.get('JOINING_DATE'), 'JOINING_DATE'),
+                    "resigned_date": clean_val(row.get('RESIGNED_DATE'), 'RESIGNED_DATE'),
                     "market_type": clean_val(row.get('MARKET_TYPE')),
                     "salary": clean_val(row.get('SALARY')),
                 }
