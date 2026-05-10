@@ -417,7 +417,7 @@ async def show_rso_multi(event, state: FSMContext):
     data = await state.get_data()
     is_edit_mode = data.get('is_edit_mode', False)
     async with async_session() as session:
-        res = await session.execute(select(FieldForce).where(FieldForce.house_id == data['house_id'], FieldForce.type.in_(['SR', 'RSO']), FieldForce.status == 'Active'))
+        res = await session.execute(select(FieldForce).where(FieldForce.house_id == data['house_id'], FieldForce.type.in_(['SR', 'RSO']), func.lower(FieldForce.status) == 'active'))
         items = res.scalars().all()
         builder = InlineKeyboardBuilder()
         for r in items:
@@ -457,7 +457,7 @@ async def show_bp_multi(event, state: FSMContext):
     data = await state.get_data()
     is_edit_mode = data.get('is_edit_mode', False)
     async with async_session() as session:
-        res = await session.execute(select(FieldForce).where(FieldForce.house_id == data['house_id'], FieldForce.type == 'BP', FieldForce.status == 'Active'))
+        res = await session.execute(select(FieldForce).where(FieldForce.house_id == data['house_id'], FieldForce.type == 'BP', func.lower(FieldForce.status) == 'active'))
         items = res.scalars().all()
         builder = InlineKeyboardBuilder()
         for b in items:
