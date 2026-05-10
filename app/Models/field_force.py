@@ -18,9 +18,9 @@ class FieldForce(Base):
     # বেসিক ইনফো
     dms_code = Column(String, unique=True, index=True) # DMS Code (R642686)
     name = Column(String, nullable=False)
-    itop_number = Column(String, unique=True, index=True)
-    personal_number = Column(String, unique=True)
-    pool_number = Column(String, unique=True)
+    itop_number = Column(String, index=True)  # unique=True removed
+    personal_number = Column(String)  # unique=True removed
+    pool_number = Column(String)  # unique=False removed (default is False)
     type = Column(String) # 'SR' or 'BP'
     status = Column(String, default="Active") # 'Active' or 'Resigned'
     
