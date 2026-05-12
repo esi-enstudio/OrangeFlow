@@ -896,7 +896,7 @@ async def ga_details_ff_select(callback: CallbackQuery):
         try:
             await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         except Exception:
-            await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+            pass  # যদি একই মেসেজ হয়, কিছু করতে হবে না
 
     await callback.answer()
 
@@ -973,7 +973,7 @@ async def ga_details_retailer_select(callback: CallbackQuery):
         try:
             await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
         except Exception:
-            await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+            pass  # যদি একই মেসেজ হয়, কিছু করতে হবে না
 
     await callback.answer()
 
