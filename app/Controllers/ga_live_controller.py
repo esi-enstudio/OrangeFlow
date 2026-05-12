@@ -615,7 +615,7 @@ async def ga_details_ff_list(callback: CallbackQuery):
                         callback_data=f"ga_details_ff_{house.id}_{ff.id}"
                     )
 
-        # পেজিনেশন বাটন
+        # পেজিনেশন বাটন (row() দিয়ে আলাদা রো তৈরি)
         if total_pages > 1:
             nav_buttons = []
             if page > 1:
@@ -627,7 +627,13 @@ async def ga_details_ff_list(callback: CallbackQuery):
                 builder.button(text=btn_text, callback_data=btn_data)
 
         builder.button(text="🔙 ফিরে যান", callback_data=f"ga_details_menu_{house.id}")
-        builder.adjust(1)
+
+        # প্রতিটি লিস্ট আইটেম আলাদা লাইনে, পেজিনেশন পাশাপাশি, ব্যাক আলাদা
+        if total_pages > 1:
+            adjust_list = [1] * len(page_codes) + [2, 1]
+        else:
+            adjust_list = [1] * len(page_codes) + [1]
+        builder.adjust(*adjust_list)
 
         type_label = {"RSO": "আরএসও", "BP": "বিপি", "CC": "সিসি", "RETAILER": "রিটেইলার"}.get(ff_type, ff_type)
         text = f"📋 **{house.name}** - {type_label} লিস্ট (পেজ {bn_num(page)}/{bn_num(total_pages)})\n"
@@ -796,7 +802,13 @@ async def ga_details_pagination(callback: CallbackQuery):
                 builder.button(text=btn_text, callback_data=btn_data)
 
         builder.button(text="🔙 ফিরে যান", callback_data=f"ga_details_menu_{house.id}")
-        builder.adjust(1)
+
+        # প্রতিটি লিস্ট আইটেম আলাদা লাইনে, পেজিনেশন পাশাপাশি, ব্যাক আলাদা
+        if total_pages > 1:
+            adjust_list = [1] * len(page_codes) + [2, 1]
+        else:
+            adjust_list = [1] * len(page_codes) + [1]
+        builder.adjust(*adjust_list)
 
         type_label = {"RSO": "আরএসও", "BP": "বিপি", "CC": "সিসি", "RETAILER": "রিটেইলার"}.get(ff_type, ff_type)
         text = f"📋 **{house.name}** - {type_label} লিস্ট (পেজ {bn_num(page)}/{bn_num(total_pages)})\n"
@@ -875,11 +887,16 @@ async def ga_details_ff_select(callback: CallbackQuery):
         # ডাটা ফরম্যাটিং
         text = format_ff_details(ff, filtered_activations, house)
 
-        # ব্যাক বাটন
+        # ব্যাক ও রিফ্রেশ বাটন
         builder = InlineKeyboardBuilder()
+        builder.button(text="🔄 রিফ্রেশ", callback_data=f"ga_details_ff_{house_id}_{ff_id}")
         builder.button(text="🔙 ফিরে যান", callback_data=f"ga_details_type_{house_id}_{ff_type}")
+        builder.adjust(2)
 
-        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        try:
+            await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        except Exception:
+            await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
     await callback.answer()
 
@@ -947,11 +964,16 @@ async def ga_details_retailer_select(callback: CallbackQuery):
         # ডাটা ফরম্যাটিং (রিটেইলারের জন্য) - async ফাংশন
         text = await get_retailer_details_formatted(session, retailer, activations)
 
-        # ব্যাক বাটন
+        # ব্যাক ও রিফ্রেশ বাটন
         builder = InlineKeyboardBuilder()
+        builder.button(text="🔄 রিফ্রেশ", callback_data=f"ga_details_retailer_{house_id}_{retailer_code}")
         builder.button(text="🔙 ফিরে যান", callback_data=f"ga_details_type_{house_id}_RETAILER")
+        builder.adjust(2)
 
-        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        try:
+            await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        except Exception:
+            await callback.message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
     await callback.answer()
 
