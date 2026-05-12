@@ -1058,7 +1058,7 @@ def format_ff_details(ff: FieldForce, activations: list, house: House) -> str:
                 text += f"Issue Date: {issue}"
 
             if i < len(acts) - 1:
-                text += "\n"
+                text += "\n\n"
 
     return text
 
@@ -1150,6 +1150,6 @@ async def get_retailer_details_formatted(session, retailer, activations: list) -
                 text += f"Issue Date: {issue}"
 
             if i < len(acts) - 1:
-                text += "\n"
+                text += "\n\n"
 
     return text
