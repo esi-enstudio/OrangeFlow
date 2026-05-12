@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -32,7 +33,7 @@ async def handle_gaf_house_logic(message: Message, state: FSMContext, user_tg_id
 
         if is_super_admin:
             # সুপার এডমিন হলে ডাটাবেজের সব হাউজ লোড করবে ✅
-            res = await session.execute(select(House))
+            res = await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))
             target_houses = res.scalars().all()
         else:
             # সাধারণ ইউজার হলে তার প্রোফাইলের হাউজ লোড করবে
@@ -41,7 +42,7 @@ async def handle_gaf_house_logic(message: Message, state: FSMContext, user_tg_id
             )
             user = res.scalar_one_or_none()
             if user:
-                target_houses = user.houses
+                target_houses = [h for h in user.houses if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
 
         if not target_houses:
             msg = "❌ বর্তমানে আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।"

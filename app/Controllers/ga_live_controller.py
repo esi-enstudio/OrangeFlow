@@ -11,6 +11,7 @@ from app.Models.house import House
 from app.Models.live_activation import LiveActivation
 from app.Models.field_force import FieldForce
 from app.Models.ga_filter import GAProductFilter, GARetailerFilter
+from app.Models.retailer import Retailer
 from app.Models.mela import Mela, MelaAssignment
 from app.Services.db_service import async_session
 from app.Utils.helpers import bn_num
@@ -46,12 +47,12 @@ async def handle_ga_logic_core(message: Message, user_tg_id: int, edit: bool = F
     async with async_session() as session:
         target_houses = []
         if is_super_admin:
-            target_houses = (await session.execute(select(House))).scalars().all()
+            target_houses = (await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))).scalars().all()
         else:
             user = (await session.execute(
                 select(User).options(selectinload(User.houses)).where(User.telegram_id == user_tg_id)
             )).scalar_one_or_none()
-            if user: target_houses = user.houses
+            if user: target_houses = [h for h in user.houses if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
 
         if not target_houses:
             text = "❌ আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।"
@@ -261,9 +262,10 @@ async def send_ga_detailed_report(message: Message, house: House, user_id: int, 
             # text += "\n\n━━━━━━━━━━━━━━━━━━━━\n"
             text += mela_report
 
-        # ৩. বাটন (রিফ্রেশ এবং ব্যাক)
+        # ৩. বাটন (রিফ্রেশ, বিস্তারিত এবং ব্যাক)
         builder = InlineKeyboardBuilder()
         builder.button(text="🔄 রিফ্রেশ করুন", callback_data=f"ga_hsel_{house.id}")
+        builder.button(text="📋 বিস্তারিত", callback_data=f"ga_details_menu_{house.id}")
 
         is_super_admin = (int(user_id) == int(SUPER_ADMIN_ID))
 
@@ -347,3 +349,807 @@ async def generate_mela_report(session, house_id, today_date):
 মোট: {bn_num(total_ga)}টি অ্যাক্টিভেশন
 ---------------------------"""
     return report
+
+
+# ==========================================
+# ৫. বিস্তারিত ওয়ার্কফ্লো - ফিল্ড ফোর্স টাইপ সিলেকশন
+# ==========================================
+
+@router.callback_query(F.data.startswith("ga_details_menu_"))
+async def ga_details_menu(callback: CallbackQuery):
+    """বিস্তারিত মেনু - ফিল্ড ফোর্স টাইপ সিলেকশন"""
+    house_id = int(callback.data.split("_")[3])
+
+    async with async_session() as session:
+        house = await session.get(House, house_id)
+        if not house:
+            await callback.answer("হাউজ পাওয়া যায়নি", show_alert=True)
+            return
+
+        # আজকের তারিখ
+        from datetime import date
+        today_str = date.today().strftime("%d-%b-%Y")
+
+        # সকল ফিল্ড ফোর্স লোড (assisted_retailer_code সহ)
+        ff_res = await session.execute(
+            select(FieldForce).where(
+                FieldForce.house_id == house.id,
+                func.lower(FieldForce.status) == 'active'
+            )
+        )
+        field_forces = ff_res.scalars().all()
+
+        # কোড -> ফিল্ড ফোর্স টাইপ ম্যাপিং তৈরি
+        rso_codes = set()
+        bp_codes = set()
+        cc_codes = set()
+        code_to_ff_map = {}  # কোড -> field_force object (দ্রুত অ্যাক্সেসের জন্য)
+
+        for ff in field_forces:
+            code = str(ff.assisted_retailer_code).replace("'", "").strip().upper() if ff.assisted_retailer_code else ""
+            if not code:
+                continue
+
+            ff_type = str(ff.type).strip().upper()
+            code_to_ff_map[code] = ff
+
+            if ff_type in ['SR', 'RSO']:
+                rso_codes.add(code)
+            elif ff_type == 'BP':
+                bp_codes.add(code)
+            elif ff_type == 'CC':
+                cc_codes.add(code)
+
+        # আজকের অ্যাক্টিভেশন লোড
+        p_filters = (await session.execute(select(GAProductFilter.product_code).where(GAProductFilter.house_id == house.id))).scalars().all()
+
+        act_query = select(LiveActivation).where(
+            LiveActivation.house_id == house.id,
+            LiveActivation.activation_date == today_str,
+            not_(LiveActivation.product_code.in_(p_filters))
+        )
+        activations = (await session.execute(act_query)).scalars().all()
+
+        if not activations:
+            await callback.message.edit_text(
+                f"❌ আজকের জন্য কোনো অ্যাক্টিভেশন পাওয়া যায়নি।",
+                reply_markup=InlineKeyboardBuilder().button(text="🔙 ফিরে যান", callback_data=f"ga_hsel_{house.id}").as_markup()
+            )
+            await callback.answer()
+            return
+
+        # গণনা (retailer_code দিয়ে ম্যাচ করে)
+        rso_retailers = set()  # ইউনিক রিটেইলার কোড
+        bp_retailers = set()
+        cc_retailers = set()
+        retailer_codes = set()
+
+        for act in activations:
+            code = str(act.retailer_code).replace("'", "").strip().upper() if act.retailer_code else ""
+            if not code:
+                continue
+
+            if code in rso_codes:
+                rso_retailers.add(code)
+            elif code in bp_codes:
+                bp_retailers.add(code)
+            elif code in cc_codes:
+                cc_retailers.add(code)
+            else:
+                # কোনো ফিল্ড ফোর্সের সাথে মিলে না = রিটেইলার
+                retailer_codes.add(code)
+
+        # কীবোর্ড বিল্ড
+        builder = InlineKeyboardBuilder()
+
+        # ফিল্ড ফোর্স টাইপ অপশন (ইউনিক রিটেইলার কোড সংখ্যা)
+        if rso_retailers:
+            builder.button(text=f"👨‍💼 আরএসও ({bn_num(len(rso_retailers))}জন)", callback_data=f"ga_details_type_{house_id}_RSO")
+        if bp_retailers:
+            builder.button(text=f"👷‍♂️ বিপি ({bn_num(len(bp_retailers))}জন)", callback_data=f"ga_details_type_{house_id}_BP")
+        if cc_retailers:
+            builder.button(text=f"🎧 সিসি ({bn_num(len(cc_retailers))}জন)", callback_data=f"ga_details_type_{house_id}_CC")
+        if retailer_codes:
+            builder.button(text=f"🏪 রিটেইলার ({bn_num(len(retailer_codes))}জন)", callback_data=f"ga_details_type_{house_id}_RETAILER")
+
+        builder.button(text="🔙 ফিরে যান", callback_data=f"ga_hsel_{house.id}")
+        builder.adjust(1)
+
+        text = f"📋 **{house.name}** - ফিল্ড ফোর্স টাইপ নির্বাচন করুন\n"
+        text += "─────────────────────\n"
+        text += "নিচের তালিকা থেকে একটি টাইপ সিলেক্ট করুন:"
+
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+    await callback.answer()
+
+
+# ==========================================
+# ৬. ফিল্ড ফোর্স লিস্ট (পেজিনেশন + সার্চ)
+# ==========================================
+
+@router.callback_query(F.data.startswith("ga_details_type_"))
+async def ga_details_ff_list(callback: CallbackQuery):
+    """নির্দিষ্ট ফিল্ড ফোর্স টাইপের লিস্ট - শুধুমাত্র আজকের অ্যাক্টিভেশন আছে এমন"""
+    parts = callback.data.split("_")
+    house_id = int(parts[3])
+    ff_type = parts[4]  # RSO, BP, CC, RETAILER
+
+    async with async_session() as session:
+        house = await session.get(House, house_id)
+        if not house:
+            await callback.answer("হাউজ পাওয়া যায়নি", show_alert=True)
+            return
+
+        from datetime import date
+        today_str = date.today().strftime("%d-%b-%Y")
+
+        # সকল ফিল্ড ফোর্স লোড
+        ff_res = await session.execute(
+            select(FieldForce).where(
+                FieldForce.house_id == house.id,
+                func.lower(FieldForce.status) == 'active'
+            )
+        )
+        field_forces = ff_res.scalars().all()
+
+        # কোড -> ফিল্ড ফোর্স ম্যাপিং
+        rso_codes = set()
+        bp_codes = set()
+        cc_codes = set()
+        code_to_ff_map = {}
+
+        for ff in field_forces:
+            code = str(ff.assisted_retailer_code).replace("'", "").strip().upper() if ff.assisted_retailer_code else ""
+            if not code:
+                continue
+
+            ff_type_upper = str(ff.type).strip().upper()
+            code_to_ff_map[code] = ff
+
+            if ff_type_upper in ['SR', 'RSO']:
+                rso_codes.add(code)
+            elif ff_type_upper == 'BP':
+                bp_codes.add(code)
+            elif ff_type_upper == 'CC':
+                cc_codes.add(code)
+
+        # আজকের অ্যাক্টিভেশন লোড
+        p_filters = (await session.execute(select(GAProductFilter.product_code).where(GAProductFilter.house_id == house.id))).scalars().all()
+
+        act_query = select(LiveActivation).where(
+            LiveActivation.house_id == house.id,
+            LiveActivation.activation_date == today_str,
+            not_(LiveActivation.product_code.in_(p_filters))
+        )
+        activations = (await session.execute(act_query)).scalars().all()
+
+        if not activations:
+            await callback.message.edit_text(
+                f"❌ আজকের জন্য কোনো অ্যাক্টিভেশন পাওয়া যায়নি।",
+                reply_markup=InlineKeyboardBuilder().button(text="🔙 ফিরে যান", callback_data=f"ga_details_menu_{house.id}").as_markup()
+            )
+            await callback.answer()
+            return
+
+        # শুধুমাত্র আজকের অ্যাক্টিভেশন আছে এমন কোড সেট তৈরি
+        activation_codes = set()
+        for act in activations:
+            code = str(act.retailer_code).replace("'", "").strip().upper() if act.retailer_code else ""
+            if code:
+                activation_codes.add(code)
+
+        # টার্গেট কোড সেট নির্ধারণ
+        if ff_type == "RETAILER":
+            target_codes = set()
+            for act in activations:
+                code = str(act.retailer_code).replace("'", "").strip().upper() if act.retailer_code else ""
+                if code and code not in rso_codes and code not in bp_codes and code not in cc_codes:
+                    target_codes.add(code)
+        else:
+            # শুধুমাত্র আজকের অ্যাক্টিভেশন আছে এমন ফিল্ড ফোর্স দেখাবে
+            if ff_type == 'RSO':
+                target_codes = rso_codes & activation_codes
+            elif ff_type == 'BP':
+                target_codes = bp_codes & activation_codes
+            elif ff_type == 'CC':
+                target_codes = cc_codes & activation_codes
+            else:
+                target_codes = set()
+
+        # পেজিনেশন (প্রতি পেজে ৫টি)
+        limit = 5
+        page = 1
+        target_codes_list = sorted(list(target_codes))
+        total_ff = len(target_codes_list)
+        total_pages = max(1, (total_ff + limit - 1) // limit)
+
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        page_codes = target_codes_list[start_idx:end_idx]
+
+        builder = InlineKeyboardBuilder()
+
+        if ff_type == "RETAILER":
+            # রিটেলার কোড থেকে নাম নিন
+            retailer_res = await session.execute(
+                select(Retailer).where(
+                    Retailer.house_id == house.id,
+                    Retailer.retailer_code.in_(page_codes)
+                )
+            )
+            retailer_map = {r.retailer_code.upper(): r for r in retailer_res.scalars().all()}
+
+            # সব RSO লোড (ITOP সার্চ করতে)
+            rso_res = await session.execute(
+                select(FieldForce).options(selectinload(FieldForce.retailers))
+                .where(FieldForce.house_id == house.id, FieldForce.type.in_(['SR', 'RSO']))
+            )
+            rso_map = {}
+            for rso in rso_res.scalars().all():
+                if rso.retailers:
+                    for r in rso.retailers:
+                        if r.retailer_code:
+                            rso_map[str(r.retailer_code).upper()] = rso
+
+            # রিটেইলার লিস্ট (নাম + RSO এর ITOP শেষ তিন সংখ্যা)
+            for code in page_codes:
+                retailer = retailer_map.get(code.upper())
+                name = retailer.name if retailer else code
+
+                # RSO খুঁজুন
+                rso = rso_map.get(code.upper())
+                rso_itop_suffix = str(rso.itop_number)[-3:] if rso and rso.itop_number else ""
+
+                display_text = f"🏪 {name} ({rso_itop_suffix})" if rso_itop_suffix else f"🏪 {name}"
+                builder.button(
+                    text=display_text,
+                    callback_data=f"ga_details_retailer_{house.id}_{code}"
+                )
+        else:
+            # RSO, BP, CC লিস্ট
+            for code in page_codes:
+                ff = code_to_ff_map.get(code)
+                if ff:
+                    builder.button(
+                        text=f"👤 {ff.name}",
+                        callback_data=f"ga_details_ff_{house.id}_{ff.id}"
+                    )
+
+        # পেজিনেশন বাটন
+        if total_pages > 1:
+            nav_buttons = []
+            if page > 1:
+                nav_buttons.append(("◀️ পূর্ববর্তী", f"ga_details_page_{house_id}_{ff_type}_{page-1}"))
+            if page < total_pages:
+                nav_buttons.append(("পরবর্তী ▶️", f"ga_details_page_{house_id}_{ff_type}_{page+1}"))
+
+            for btn_text, btn_data in nav_buttons:
+                builder.button(text=btn_text, callback_data=btn_data)
+
+        builder.button(text="🔙 ফিরে যান", callback_data=f"ga_details_menu_{house.id}")
+        builder.adjust(1)
+
+        type_label = {"RSO": "আরএসও", "BP": "বিপি", "CC": "সিসি", "RETAILER": "রিটেইলার"}.get(ff_type, ff_type)
+        text = f"📋 **{house.name}** - {type_label} লিস্ট (পেজ {bn_num(page)}/{bn_num(total_pages)})\n"
+        text += f"─────────────────────\n"
+        text += f"মোট: {bn_num(total_ff)}জন"
+
+        if not target_codes:
+            text = f"কোনো {type_label} পাওয়া যায়নি।"
+
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+    await callback.answer()
+
+
+# ==========================================
+# ৭. পেজিনেশন হ্যান্ডেলার
+# ==========================================
+
+@router.callback_query(F.data.startswith("ga_details_page_"))
+async def ga_details_pagination(callback: CallbackQuery):
+    """পেজিনেশন হ্যান্ডেলার"""
+    parts = callback.data.split("_")
+    house_id = int(parts[3])
+    ff_type = parts[4]  # RSO, BP, CC, RETAILER
+    page = int(parts[5])
+
+    async with async_session() as session:
+        house = await session.get(House, house_id)
+        if not house:
+            await callback.answer("হাউজ পাওয়া যায়নি", show_alert=True)
+            return
+
+        from datetime import date
+        today_str = date.today().strftime("%d-%b-%Y")
+
+        # সকল ফিল্ড ফোর্স লোড
+        ff_res = await session.execute(
+            select(FieldForce).where(
+                FieldForce.house_id == house.id,
+                func.lower(FieldForce.status) == 'active'
+            )
+        )
+        field_forces = ff_res.scalars().all()
+
+        # কোড -> ফিল্ড ফোর্স ম্যাপিং
+        rso_codes = set()
+        bp_codes = set()
+        cc_codes = set()
+        code_to_ff_map = {}
+
+        for ff in field_forces:
+            code = str(ff.assisted_retailer_code).replace("'", "").strip().upper() if ff.assisted_retailer_code else ""
+            if not code:
+                continue
+
+            ff_type_upper = str(ff.type).strip().upper()
+            code_to_ff_map[code] = ff
+
+            if ff_type_upper in ['SR', 'RSO']:
+                rso_codes.add(code)
+            elif ff_type_upper == 'BP':
+                bp_codes.add(code)
+            elif ff_type_upper == 'CC':
+                cc_codes.add(code)
+
+        # আজকের অ্যাক্টিভেশন লোড
+        p_filters = (await session.execute(select(GAProductFilter.product_code).where(GAProductFilter.house_id == house.id))).scalars().all()
+
+        act_query = select(LiveActivation).where(
+            LiveActivation.house_id == house.id,
+            LiveActivation.activation_date == today_str,
+            not_(LiveActivation.product_code.in_(p_filters))
+        )
+        activations = (await session.execute(act_query)).scalars().all()
+
+        limit = 5
+
+        # শুধুমাত্র আজকের অ্যাক্টিভেশন আছে এমন কোড সেট তৈরি
+        activation_codes = set()
+        for act in activations:
+            code = str(act.retailer_code).replace("'", "").strip().upper() if act.retailer_code else ""
+            if code:
+                activation_codes.add(code)
+
+        # টার্গেট কোড সেট নির্ধারণ
+        if ff_type == "RETAILER":
+            target_codes = set()
+            for act in activations:
+                code = str(act.retailer_code).replace("'", "").strip().upper() if act.retailer_code else ""
+                if code and code not in rso_codes and code not in bp_codes and code not in cc_codes:
+                    target_codes.add(code)
+        else:
+            # শুধুমাত্র আজকের অ্যাক্টিভেশন আছে এমন ফিল্ড ফোর্স দেখাবে
+            if ff_type == 'RSO':
+                target_codes = rso_codes & activation_codes
+            elif ff_type == 'BP':
+                target_codes = bp_codes & activation_codes
+            elif ff_type == 'CC':
+                target_codes = cc_codes & activation_codes
+            else:
+                target_codes = set()
+
+        target_codes_list = sorted(list(target_codes))
+        total_ff = len(target_codes_list)
+        total_pages = max(1, (total_ff + limit - 1) // limit)
+
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        page_codes = target_codes_list[start_idx:end_idx]
+
+        builder = InlineKeyboardBuilder()
+
+        if ff_type == "RETAILER":
+            # রিটেলার কোড থেকে নাম নিন
+            retailer_res = await session.execute(
+                select(Retailer).where(
+                    Retailer.house_id == house.id,
+                    Retailer.retailer_code.in_(page_codes)
+                )
+            )
+            retailer_map = {r.retailer_code.upper(): r for r in retailer_res.scalars().all()}
+
+            # সব RSO লোড (ITOP সার্চ করতে)
+            rso_res = await session.execute(
+                select(FieldForce).options(selectinload(FieldForce.retailers))
+                .where(FieldForce.house_id == house.id, FieldForce.type.in_(['SR', 'RSO']))
+            )
+            rso_map = {}
+            for rso in rso_res.scalars().all():
+                if rso.retailers:
+                    for r in rso.retailers:
+                        if r.retailer_code:
+                            rso_map[str(r.retailer_code).upper()] = rso
+
+            for code in page_codes:
+                retailer = retailer_map.get(code.upper())
+                name = retailer.name if retailer else code
+
+                # RSO খুঁজুন
+                rso = rso_map.get(code.upper())
+                rso_itop_suffix = str(rso.itop_number)[-3:] if rso and rso.itop_number else ""
+
+                display_text = f"🏪 {name} ({rso_itop_suffix})" if rso_itop_suffix else f"🏪 {name}"
+                builder.button(
+                    text=display_text,
+                    callback_data=f"ga_details_retailer_{house.id}_{code}"
+                )
+        else:
+            for code in page_codes:
+                ff = code_to_ff_map.get(code)
+                if ff:
+                    builder.button(
+                        text=f"👤 {ff.name}",
+                        callback_data=f"ga_details_ff_{house.id}_{ff.id}"
+                    )
+
+        # পেজিনেশন
+        if total_pages > 1:
+            nav_buttons = []
+            if page > 1:
+                nav_buttons.append(("◀️ পূর্ববর্তী", f"ga_details_page_{house_id}_{ff_type}_{page-1}"))
+            if page < total_pages:
+                nav_buttons.append(("পরবর্তী ▶️", f"ga_details_page_{house_id}_{ff_type}_{page+1}"))
+
+            for btn_text, btn_data in nav_buttons:
+                builder.button(text=btn_text, callback_data=btn_data)
+
+        builder.button(text="🔙 ফিরে যান", callback_data=f"ga_details_menu_{house.id}")
+        builder.adjust(1)
+
+        type_label = {"RSO": "আরএসও", "BP": "বিপি", "CC": "সিসি", "RETAILER": "রিটেইলার"}.get(ff_type, ff_type)
+        text = f"📋 **{house.name}** - {type_label} লিস্ট (পেজ {bn_num(page)}/{bn_num(total_pages)})\n"
+        text += f"─────────────────────\n"
+        text += f"মোট: {bn_num(total_ff)}জন"
+
+        if not target_codes:
+            text = f"কোনো {type_label} পাওয়া যায়নি।"
+
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+
+    await callback.answer()
+
+
+# ==========================================
+# ৮. ফিল্ড ফোর্স সিলেক্ট - বিস্তারিত ডাটা দেখানো
+# ==========================================
+
+@router.callback_query(F.data.startswith("ga_details_ff_"))
+async def ga_details_ff_select(callback: CallbackQuery):
+    """নির্দিষ্ট ফিল্ড ফোর্সের বিস্তারিত ডাটা"""
+    parts = callback.data.split("_")
+    house_id = int(parts[3])
+    ff_id = int(parts[4])
+
+    async with async_session() as session:
+        house = await session.get(House, house_id)
+        ff = await session.execute(
+            select(FieldForce).options(selectinload(FieldForce.retailers)).where(FieldForce.id == ff_id)
+        )
+        ff = ff.scalar_one_or_none()
+
+        if not house or not ff:
+            await callback.answer("ডাটা পাওয়া যায়নি", show_alert=True)
+            return
+
+        # আজকের তারিখ
+        from datetime import date
+        today_str = date.today().strftime("%d-%b-%Y")
+
+        # ফিল্ড ফোর্সের কোড
+        ff_code = str(ff.assisted_retailer_code).replace("'", "").strip().upper() if ff.assisted_retailer_code else ""
+        ff_type = str(ff.type).strip().upper()
+
+        # অ্যাক্টিভেশন ডাটা লোড
+        p_filters = (await session.execute(select(GAProductFilter.product_code).where(GAProductFilter.house_id == house.id))).scalars().all()
+
+        act_query = select(LiveActivation).where(
+            LiveActivation.house_id == house.id,
+            LiveActivation.activation_date == today_str,
+            not_(LiveActivation.product_code.in_(p_filters))
+        )
+        activations = (await session.execute(act_query)).scalars().all()
+
+        # এই ফিল্ড ফোর্সের সমস্ত অ্যাক্টিভেশন ফিল্টার
+        target_codes = {ff_code}
+
+        # RSO হলে তার রিটেইলারদের কোডও যোগ
+        if ff_type in ['SR', 'RSO'] and ff.retailers:
+            for r in ff.retailers:
+                r_code = str(r.retailer_code).replace("'", "").strip().upper()
+                if r_code:
+                    target_codes.add(r_code)
+
+        # ফিল্টার করা অ্যাক্টিভেশন
+        filtered_activations = [a for a in activations if str(a.retailer_code).replace("'", "").strip().upper() in target_codes]
+
+        if not filtered_activations:
+            await callback.message.edit_text(
+                f"❌ আজকের জন্য কোনো অ্যাক্টিভেশন পাওয়া যায়নি।",
+                reply_markup=InlineKeyboardBuilder().button(text="🔙 ফিরে যান", callback_data=f"ga_details_type_{house_id}_{ff_type}").as_markup()
+            )
+            await callback.answer()
+            return
+
+        # ডাটা ফরম্যাটিং
+        text = format_ff_details(ff, filtered_activations, house)
+
+        # ব্যাক বাটন
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔙 ফিরে যান", callback_data=f"ga_details_type_{house_id}_{ff_type}")
+
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+    await callback.answer()
+
+
+# ==========================================
+# ৯. রিটেইলার সিলেক্ট - বিস্তারিত ডাটা দেখানো
+# ==========================================
+
+@router.callback_query(F.data.startswith("ga_details_retailer_"))
+async def ga_details_retailer_select(callback: CallbackQuery):
+    """নির্দিষ্ট রিটেইলারের বিস্তারিত ডাটা"""
+    parts = callback.data.split("_")
+    house_id = int(parts[3])
+    # রিটেইলার কোডে underscores থাকতে পারে, তাই সব অংশ যোগ করা
+    retailer_code = "_".join(parts[4:])  # retailer code (may contain underscores)
+
+    async with async_session() as session:
+        house = await session.get(House, house_id)
+        if not house:
+            await callback.answer("হাউজ পাওয়া যায়নি", show_alert=True)
+            return
+
+        # রিটেইলার খুঁজুন
+        retailer_res = await session.execute(
+            select(Retailer).where(Retailer.house_id == house.id, Retailer.retailer_code == retailer_code)
+        )
+        retailer = retailer_res.scalar_one_or_none()
+
+        # রিটেইলার খুঁজে না পেলে নতুন তৈরি করুন
+        if not retailer:
+            retailer = Retailer(
+                house_id=house.id,
+                retailer_code=retailer_code,
+                name=retailer_code,  # নাম না থাকলে কোডই দেখাবে
+                field_force_id=None  # ডিফল্ট None
+            )
+
+        if not retailer:
+            await callback.answer("রিটেইলার পাওয়া যায়নি", show_alert=True)
+            return
+
+        # আজকের তারিখ
+        from datetime import date
+        today_str = date.today().strftime("%d-%b-%Y")
+
+        # অ্যাক্টিভেশন ডাটা লোড
+        p_filters = (await session.execute(select(GAProductFilter.product_code).where(GAProductFilter.house_id == house.id))).scalars().all()
+
+        act_query = select(LiveActivation).where(
+            LiveActivation.house_id == house.id,
+            LiveActivation.activation_date == today_str,
+            LiveActivation.retailer_code == retailer_code,
+            not_(LiveActivation.product_code.in_(p_filters))
+        )
+        activations = (await session.execute(act_query)).scalars().all()
+
+        if not activations:
+            await callback.message.edit_text(
+                f"❌ আজকের জন্য কোনো অ্যাক্টিভেশন পাওয়া যায়নি।",
+                reply_markup=InlineKeyboardBuilder().button(text="🔙 ফিরে যান", callback_data=f"ga_details_type_{house_id}_RETAILER").as_markup()
+            )
+            await callback.answer()
+            return
+
+        # ডাটা ফরম্যাটিং (রিটেইলারের জন্য) - async ফাংশন
+        text = await get_retailer_details_formatted(session, retailer, activations)
+
+        # ব্যাক বাটন
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔙 ফিরে যান", callback_data=f"ga_details_type_{house_id}_RETAILER")
+
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+
+    await callback.answer()
+
+
+# ==========================================
+# ১১. সার্চ হ্যান্ডেলার (বেসিক)
+# ==========================================
+
+@router.callback_query(F.data.startswith("ga_details_search_"))
+async def ga_details_search(callback: CallbackQuery):
+    """সার্চ অপশন - ফিল্ড ফোর্স সার্চ"""
+    parts = callback.data.split("_")
+    house_id = int(parts[3])
+    ff_type = parts[4]  # RSO, BP, CC, RETAILER
+
+    type_label = {
+        "RSO": "আরএসও",
+        "BP": "বিপি",
+        "CC": "সিসি",
+        "RETAILER": "রিটেইলার"
+    }.get(ff_type, ff_type)
+
+    await callback.message.edit_text(
+        f"🔍 **{type_label} সার্চ**\n"
+        "─────────────────────\n"
+        "আপনি নিম্নলিখিত যেকোনো তথ্য দিয়ে সার্চ করতে পারেন:\n"
+        "• নাম\n"
+        "• অ্যাসিস্ট্যাড কোড\n"
+        "• আইটপ নাম্বার\n"
+        "• পুল নাম্বার\n\n"
+        "⚠️ সার্চ ফিচার শীঘ্রই আসবে।\n"
+        "বর্তমানে আপনি তালিকা থেকে সরাসরি নির্বাচন করুন।",
+        reply_markup=InlineKeyboardBuilder().button(
+            text="🔙 ফিরে যান",
+            callback_data=f"ga_details_type_{house_id}_{ff_type}"
+        ).as_markup(),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+# ==========================================
+# ১০. ডাটা ফরম্যাটিং ফাংশন
+# ==========================================
+
+def format_ff_details(ff: FieldForce, activations: list, house: House) -> str:
+    """ফিল্ড ফোর্সের বিস্তারিত ডাটা ফরম্যাট"""
+    from app.Utils.helpers import bn_num
+
+    ff_type = str(ff.type).strip().upper()
+
+    # নাম এবং নাম্বার
+    name = ff.name
+
+    # নাম্বার নির্ধারণ (RSO = ITOP, BP/CC = Pool)
+    if ff_type in ['SR', 'RSO']:
+        number = ff.itop_number or "N/A"
+    else:
+        number = ff.pool_number or "N/A"
+
+    # কোড এবং রেকর্ড সংখ্যা
+    ff_code = str(ff.assisted_retailer_code).replace("'", "").strip() if ff.assisted_retailer_code else "N/A"
+    record_count = len(activations)
+
+    # টেক্সট তৈরি
+    text = f"<b>{name}</b>\n"
+    text += f"{number}\n"
+    text += f"{ff_code} • {record_count}\n"
+    text += "─────────────────────\n"
+
+    # প্রোডাক্ট কোড অনুযায়ী গ্রুপ
+    product_groups = {}
+    for act in activations:
+        prod_code = str(act.product_code).strip() if act.product_code else "UNKNOWN"
+        if prod_code not in product_groups:
+            product_groups[prod_code] = []
+        product_groups[prod_code].append(act)
+
+    # প্রোডাক্ট কোড অনুযায়ী প্রদর্শন
+    first_group = True
+    for prod_code, acts in sorted(product_groups.items()):
+        if not first_group:
+            text += "\n━━━━━━━━━━━━━━\n"
+        first_group = False
+
+        # প্রোডাক্ট কোড হেডার
+        text += f"<b>{prod_code}</b> • {len(acts)}\n"
+
+        # প্রতিটি অ্যাক্টিভেশন
+        for i, act in enumerate(acts):
+            text += f"{act.sim_no or 'N/A'}\n"
+            text += f"{act.msisdn or 'N/A'}"
+
+            if act.activation_time:
+                text += f" • {act.activation_time}"
+            text += "\n"
+
+            # তারিখ (শুধু তারিখ দেখাবে, সময় বাদ)
+            if act.dh_lifting_date:
+                lifting = str(act.dh_lifting_date)[:10] if act.dh_lifting_date else ""
+                text += f"Lifting Date: {lifting}\n"
+            if act.issue_date:
+                issue = str(act.issue_date)[:10] if act.issue_date else ""
+                text += f"Issue Date: {issue}"
+
+            if i < len(acts) - 1:
+                text += "\n"
+
+    return text
+
+
+async def get_retailer_details_formatted(session, retailer, activations: list) -> str:
+    """রিটেইলারের বিস্তারিত ডাটা ফরম্যাট"""
+    from app.Utils.helpers import bn_num
+
+    # রিটেইলার RSO খুঁজুন (RSO এর ITOP শেষ ৩ সংখ্যা দেখানোর জন্য)
+    rso_itop_suffix = ""
+    rso_name = ""
+    ff = None
+
+    if retailer:
+        # প্রথমে field_force_id চেক করুন
+        if retailer.field_force_id:
+            ff = await session.get(FieldForce, retailer.field_force_id)
+
+        # যদি না পাওয়া যায়, তাহলে RSO এর retailers লিস্টে খুঁজুন
+        if not ff and retailer.retailer_code:
+            rso_res = await session.execute(
+                select(FieldForce).options(selectinload(FieldForce.retailers))
+                .where(FieldForce.house_id == retailer.house_id, FieldForce.type.in_(['SR', 'RSO']))
+            )
+            for rso in rso_res.scalars().all():
+                if rso.retailers:
+                    for r in rso.retailers:
+                        if r.retailer_code and str(r.retailer_code).strip().upper() == str(retailer.retailer_code).strip().upper():
+                            ff = rso
+                            break
+                if ff:
+                    break
+
+    if ff and ff.itop_number:
+        rso_itop_suffix = str(ff.itop_number)[-3:]
+        rso_name = ff.name
+
+    # নাম এবং নাম্বার
+    name = retailer.name if retailer else "Unknown"
+    number = str(retailer.itop_number).strip() if retailer and retailer.itop_number else "N/A"
+
+    # রিটেইলারের জন্য RSO এর ITOP শেষ ৩ সংখ্যা দেখাও
+    if rso_itop_suffix:
+        number = f"{number} ({rso_itop_suffix})"
+
+    # কোড এবং রেকর্ড সংখ্যা
+    r_code = str(retailer.retailer_code).replace("'", "").strip() if retailer and retailer.retailer_code else "N/A"
+    record_count = len(activations)
+
+    # টেক্সট তৈরি
+    text = f"<b>{name}</b>\n"
+    text += f"{number}\n"
+    text += f"{r_code} • {record_count}\n"
+    text += "─────────────────────\n"
+
+    # প্রোডাক্ট কোড অনুযায়ী গ্রুপ
+    product_groups = {}
+    for act in activations:
+        prod_code = str(act.product_code).strip() if act.product_code else "UNKNOWN"
+        if prod_code not in product_groups:
+            product_groups[prod_code] = []
+        product_groups[prod_code].append(act)
+
+    # প্রোডাক্ট কোড অনুযায়ী প্রদর্শন
+    first_group = True
+    for prod_code, acts in sorted(product_groups.items()):
+        if not first_group:
+            text += "\n"
+        first_group = False
+
+        # প্রোডাক্ট কোড হেডার
+        text += f"<b>{prod_code}</b> • {len(acts)}\n"
+
+        # প্রতিটি অ্যাক্টিভেশন
+        for i, act in enumerate(acts):
+            text += f"{act.sim_no or 'N/A'}\n"
+            text += f"{act.msisdn or 'N/A'}"
+
+            if act.activation_time:
+                text += f" • {act.activation_time}"
+            text += "\n"
+
+            # তারিখ (শুধু তারিখ দেখাবে, সময় বাদ)
+            if act.dh_lifting_date:
+                lifting = str(act.dh_lifting_date)[:10] if act.dh_lifting_date else ""
+                text += f"Lifting Date: {lifting}\n"
+            if act.issue_date:
+                issue = str(act.issue_date)[:10] if act.issue_date else ""
+                text += f"Issue Date: {issue}"
+
+            if i < len(acts) - 1:
+                text += "\n"
+
+    return text

@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -54,7 +55,7 @@ async def start_activation_upload_process(message: Message, state: FSMContext):
 
         if is_super_admin:
             # সুপার এডমিন সব হাউজ দেখবে
-            res = await session.execute(select(House))
+            res = await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))
             target_houses = res.scalars().all()
         else:
             # সাধারণ ইউজার তার লিঙ্ক করা হাউজগুলো দেখবে
@@ -62,7 +63,7 @@ async def start_activation_upload_process(message: Message, state: FSMContext):
                 select(User).options(selectinload(User.houses)).where(User.telegram_id == user_tg_id)
             )
             user = u_res.scalar_one_or_none()
-            if user: target_houses = user.houses
+            if user: target_houses = [h for h in user.houses if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
 
         if not target_houses:
             return await message.answer("❌ আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।")

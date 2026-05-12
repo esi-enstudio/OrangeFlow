@@ -1,5 +1,6 @@
 import os
 import logging
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -86,13 +87,13 @@ async def upload_eligible_bts_start(message: Message, state: FSMContext):
         target_houses = []
 
         if is_super_admin:
-            res = await session.execute(select(House))
+            res = await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))
             target_houses = res.scalars().all()
         else:
             user = (await session.execute(
                 select(User).options(selectinload(User.houses)).where(User.telegram_id == user_tg_id)
             )).scalar_one_or_none()
-            if user: target_houses = user.houses
+            if user: target_houses = [h for h in user.houses if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
 
         if not target_houses:
             return await message.answer("❌ আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।")

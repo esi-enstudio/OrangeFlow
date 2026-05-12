@@ -34,6 +34,7 @@ class House(Base):
     )
     
     retailers = relationship("Retailer", back_populates="house")
+    subscriptions = relationship("HouseSubscription", back_populates="house", order_by="desc(HouseSubscription.end_date)")
 
     @property
     def display_name(self):

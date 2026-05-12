@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -34,7 +35,7 @@ async def trigger_sim_status(callback: CallbackQuery, state: FSMContext):
 
         if is_super_admin:
             # সুপার এডমিন হলে ডাটাবেজের সব হাউজ লোড করবে ✅
-            res = await session.execute(select(House))
+            res = await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))
             target_houses = res.scalars().all()
         else:
             # সাধারণ ইউজার হলে শুধু তার সাথে লিঙ্ক করা হাউজগুলো নিবে
@@ -43,7 +44,7 @@ async def trigger_sim_status(callback: CallbackQuery, state: FSMContext):
             )
             user = res.scalar_one_or_none()
             if user:
-                target_houses = user.houses
+                target_houses = [h for h in user.houses if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
 
         if not target_houses:
             return await callback.answer("❌ আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।", show_alert=True)

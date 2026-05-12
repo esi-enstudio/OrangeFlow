@@ -15,6 +15,7 @@ from app.Models.field_force import FieldForce
 from app.Models.retailer import Retailer
 from app.Models.house import House
 from app.Models.user import User
+from app.Models.activation import Activation
 
 from app.Services.db_service import async_session
 from app.Utils.helpers import bn_num
@@ -65,19 +66,22 @@ async def _build_retailer_rso_suffix_map(session, ret_objs: list) -> dict:
     return {rid: itop for rid, itop in rso_items}
 
 
-def _format_member_texts(rso_objs: list, bp_objs: list, ret_objs: list, retailer_rso_suffix_map: dict) -> tuple[str, str, str]:
+def _format_member_texts(rso_objs: list, bp_objs: list, ret_objs: list, retailer_rso_suffix_map: dict, activation_map: dict = None) -> tuple[str, str, str]:
+    if activation_map is None:
+        activation_map = {}
+
     rso_text = "".join([
-        f" {bn_num(i)} {r.assisted_retailer_code} ({str(r.itop_number)[-3:] if r.itop_number else '000'})\n"
+        f" {bn_num(i)} {r.assisted_retailer_code} ({str(r.itop_number)[-3:] if r.itop_number else '000'}) - {bn_num(activation_map.get(r.assisted_retailer_code.upper() if r.assisted_retailer_code else '', 0))}টি\n"
         for i, r in enumerate(rso_objs, 1)
     ]) or " N/A\n"
 
     bp_text = "".join([
-        f" {bn_num(i)} {b.name or 'N/A'}-{b.assisted_retailer_code or 'N/A'}\n"
+        f" {bn_num(i)} {b.name or 'N/A'}-{b.assisted_retailer_code or 'N/A'} - {bn_num(activation_map.get(b.assisted_retailer_code.upper() if b.assisted_retailer_code else '', 0))}টি\n"
         for i, b in enumerate(bp_objs, 1)
     ]) or " N/A\n"
 
     ret_text = "".join([
-        f" {bn_num(i)} {r.name or 'N/A'} ({str(retailer_rso_suffix_map.get(r.field_force_id))[-3:] if retailer_rso_suffix_map.get(r.field_force_id) else '000'})\n"
+        f" {bn_num(i)} {r.name or 'N/A'} ({str(retailer_rso_suffix_map.get(r.field_force_id))[-3:] if retailer_rso_suffix_map.get(r.field_force_id) else '000'}) - {bn_num(activation_map.get(r.retailer_code.upper() if r.retailer_code else '', 0))}টি\n"
         for i, r in enumerate(ret_objs, 1)
     ]) or " N/A\n"
     return rso_text, bp_text, ret_text
@@ -97,12 +101,31 @@ def _build_mela_report(
     ret_text: str,
     rso_count: int,
     bp_count: int,
-    ret_count: int
+    ret_count: int,
+    rso_total: int = 0,
+    bp_total: int = 0,
+    ret_total: int = 0,
+    grand_total: int = 0
 ) -> str:
     header = ""
     if status_text:
         header = f"🎊 <b>অভিনন্দন!</b>\n✅ <b>{status_text}</b>\n━━━━━━━━━━━━━━━━━━━━\n"
-    
+
+    # RSO টোটাল
+    rso_section = f"🔹 আরএসও ({bn_num(rso_count)} জন): \n{rso_text}"
+    if rso_count > 1 and rso_total > 0:
+        rso_section += f"👉 মোট: {bn_num(rso_total)}টি\n"
+
+    # BP টোটাল
+    bp_section = f"🔹 বিপি ({bn_num(bp_count)} জন):\n{bp_text}"
+    if bp_count > 1 and bp_total > 0:
+        bp_section += f"👉 মোট: {bn_num(bp_total)}টি\n"
+
+    # Retailer টোটাল
+    ret_section = f"🔹 রিটেইলার ({bn_num(ret_count)} জন): \n{ret_text}"
+    if ret_count > 1 and ret_total > 0:
+        ret_section += f"👉 মোট: {bn_num(ret_total)}টি\n"
+
     return (
         f"{header}"
         f"🏢 হাউজ: <b>{house_name}</b>\n"
@@ -112,9 +135,11 @@ def _build_mela_report(
         f"🏘 থানা: <b>{thana_name}</b>\n\n"
         f"📡 <b>বিটিএস কোডসমূহ:</b>\n{bts_text}\n"
         f"👥 <b>অংশগ্রহণকারী মেম্বার:</b>\n"
-        f"🔹 আরএসও ({bn_num(rso_count)} জন): \n{rso_text}\n"
-        f"🔹 বিপি ({bn_num(bp_count)} জন):\n{bp_text}\n"
-        f"🔹 রিটেইলার ({bn_num(ret_count)} জন): \n{ret_text}"
+        f"{rso_section}\n"
+        f"{bp_section}\n"
+        f"{ret_section}"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 <b>মেলার সর্বমোট অ্যাক্টিভেশন: {bn_num(grand_total)}টি</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━"
     )
 
@@ -143,7 +168,32 @@ async def render_single_mela_view(message: Message, m_id: int, permissions: list
         bp_objs = (await session.execute(select(FieldForce).where(FieldForce.assisted_retailer_code.in_(bp_codes)))).scalars().all() if bp_codes else []
         ret_objs = (await session.execute(select(Retailer).where(Retailer.retailer_code.in_(ret_codes)))).scalars().all() if ret_codes else []
         retailer_rso_suffix_map = await _build_retailer_rso_suffix_map(session, ret_objs)
-        rso_text, bp_text, ret_text = _format_member_texts(rso_objs, bp_objs, ret_objs, retailer_rso_suffix_map)
+
+        # অ্যাক্টিভেশন কাউন্ট নিয়ে আসুন (activations টেবিল থেকে)
+        mela_date = m.activity_date
+        all_codes = rso_codes + bp_codes + ret_codes
+        activation_map = {}
+        if mela_date and all_codes:
+            lower_codes = [c.lower() for c in all_codes]
+            act_res = await session.execute(
+                select(Activation.retailer_code, func.count(Activation.id))
+                .where(
+                    Activation.house_id == m.house_id,
+                    Activation.activation_date == mela_date,
+                    func.lower(Activation.retailer_code).in_(lower_codes)
+                )
+                .group_by(Activation.retailer_code)
+            )
+            for code, count in act_res.all():
+                activation_map[code.upper() if code else ""] = count
+
+        rso_text, bp_text, ret_text = _format_member_texts(rso_objs, bp_objs, ret_objs, retailer_rso_suffix_map, activation_map)
+
+        # টোটাল কাউন্ট গণনা
+        rso_total = sum(activation_map.get(code.upper(), 0) for code in rso_codes)
+        bp_total = sum(activation_map.get(code.upper(), 0) for code in bp_codes)
+        ret_total = sum(activation_map.get(code.upper(), 0) for code in ret_codes)
+        grand_total = rso_total + bp_total + ret_total
 
         report_text = _build_mela_report(
             status_text=status_text,
@@ -158,7 +208,11 @@ async def render_single_mela_view(message: Message, m_id: int, permissions: list
             ret_text=ret_text,
             rso_count=len(rso_objs),
             bp_count=len(bp_objs),
-            ret_count=len(ret_objs)
+            ret_count=len(ret_objs),
+            rso_total=rso_total,
+            bp_total=bp_total,
+            ret_total=ret_total,
+            grand_total=grand_total
         )
 
         builder = InlineKeyboardBuilder()
@@ -196,12 +250,12 @@ async def mela_mgmt_start(message: Message, state: FSMContext, permissions: list
         is_admin = (int(message.from_user.id) == int(SUPER_ADMIN_ID))
         logger.info(f"mela_mgmt_start: user_id={message.from_user.id}, SUPER_ADMIN_ID={SUPER_ADMIN_ID}, is_admin={is_admin}")
         if is_admin:
-            houses = (await session.execute(select(House))).scalars().all()
+            houses = (await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))).scalars().all()
         else:
             user = (await session.execute(
                 select(User).options(selectinload(User.houses)).where(User.telegram_id == message.from_user.id)
             )).scalar_one_or_none()
-            houses = user.houses if user else []
+            houses = [h for h in (user.houses if user else []) if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
         logger.info(f"houses count: {len(houses)}")
         if not houses: return await message.answer("❌ হাউজ পাওয়া যায়নি।")
         if len(houses) == 1: return await render_mela_dashboard(message, houses[0].id, permissions, edit_mode=False)
@@ -224,12 +278,12 @@ async def change_house_mela(callback: CallbackQuery, state: FSMContext, permissi
     async with async_session() as session:
         # সুপার এডমিন চেক
         if int(user_id) == int(SUPER_ADMIN_ID):
-            houses = (await session.execute(select(House))).scalars().all()
+            houses = (await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))).scalars().all()
         else:
             user = (await session.execute(
                 select(User).options(selectinload(User.houses)).where(User.telegram_id == user_id)
             )).scalar_one_or_none()
-            houses = user.houses if user else []
+            houses = [h for h in (user.houses if user else []) if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
 
         if not houses:
             return await callback.answer("❌ হাউজ পাওয়া যায়নি।", show_alert=True)

@@ -1,5 +1,6 @@
 import os
 import logging
+from datetime import datetime
 from aiogram import Router, F, types
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.context import FSMContext
@@ -61,7 +62,7 @@ async def retailer_main(event: types.Union[Message, CallbackQuery], state: FSMCo
             if house: return await show_house_retailer_menu(target, house.id, house.display_name, permissions)
 
         if int(user_id) == int(SUPER_ADMIN_ID):
-            h_res = await session.execute(select(House))
+            h_res = await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))
             all_houses = h_res.scalars().all()
             builder = InlineKeyboardBuilder()
             for h in all_houses: builder.button(text=f"🏢 {h.display_name}", callback_data=f"ret_hsel_{h.id}")
@@ -69,15 +70,16 @@ async def retailer_main(event: types.Union[Message, CallbackQuery], state: FSMCo
 
         res = await session.execute(select(User).options(selectinload(User.houses)).where(User.telegram_id == user_id))
         user = res.scalar_one_or_none()
-        if not user or not user.houses: return await target.answer("❌ কোনো হাউজ যুক্ত নেই।")
+        user_houses = [h for h in (user.houses if user else []) if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
+        if not user_houses: return await target.answer("❌ কোনো হাউজ যুক্ত নেই।")
 
-        if len(user.houses) == 1:
-            house = user.houses[0]
+        if len(user_houses) == 1:
+            house = user_houses[0]
             await state.update_data(selected_house_id=house.id)
             return await show_house_retailer_menu(target, house.id, house.display_name, permissions)
 
         builder = InlineKeyboardBuilder()
-        for h in user.houses: builder.button(text=f"🏢 {h.display_name}", callback_data=f"ret_hsel_{h.id}")
+        for h in user_houses: builder.button(text=f"🏢 {h.display_name}", callback_data=f"ret_hsel_{h.id}")
         await target.answer("🏢 হাউজ নির্বাচন করুন:", reply_markup=builder.adjust(1).as_markup())
 
 @router.callback_query(F.data == "ret_change_house")

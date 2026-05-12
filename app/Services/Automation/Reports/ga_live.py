@@ -151,7 +151,11 @@ async def process_and_save_data(file_path, house_id):
 
                     # হেল্পার ফাংশন: ডাটা ক্লিন এবং স্ট্রিং নিশ্চিত করতে
                     def get_val(key):
-                        return str(row.get(key, '')).strip()
+                        v = str(row.get(key, '')).strip()
+                        # তারিখ থেকে সময় বাদ দেওয়া
+                        if ' ' in v and '-' in v:
+                            v = v.split(' ')[0]
+                        return v
 
                     new_activation = LiveActivation(
                         house_id=house_id,

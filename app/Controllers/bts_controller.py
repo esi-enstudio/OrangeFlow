@@ -2,6 +2,7 @@ import os
 import unicodedata
 import asyncio
 import logging
+from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.context import FSMContext
@@ -92,10 +93,10 @@ async def bts_main_entry(message: Message, state: FSMContext, permissions: list)
     async with async_session() as session:
         # সুপার এডমিন চেক
         if int(user_id) == int(SUPER_ADMIN_ID):
-            houses = (await session.execute(select(House))).scalars().all()
+            houses = (await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))).scalars().all()
         else:
             user = (await session.execute(select(User).options(selectinload(User.houses)).where(User.telegram_id == user_id))).scalar_one_or_none()
-            houses = user.houses if user else []
+            houses = [h for h in (user.houses if user else []) if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
 
         if not houses: return await message.answer("❌ কোনো হাউজ যুক্ত নেই।")
         
@@ -397,12 +398,12 @@ async def bts_change_house(callback: CallbackQuery, state: FSMContext, permissio
     async with async_session() as session:
         # সুপার এডমিন চেক
         if int(user_id) == int(SUPER_ADMIN_ID):
-            houses = (await session.execute(select(House))).scalars().all()
+            houses = (await session.execute(select(House).where(House.is_active == True))).scalars().all()
         else:
             user = (await session.execute(
                 select(User).options(selectinload(User.houses)).where(User.telegram_id == user_id)
             )).scalar_one_or_none()
-            houses = user.houses if user else []
+            houses = [h for h in (user.houses if user else []) if h.is_active]
 
         if not houses:
             return await callback.answer("❌ কোনো হাউজ যুক্ত নেই।", show_alert=True)

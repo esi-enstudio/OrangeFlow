@@ -1,6 +1,7 @@
 import asyncio
 import os
 import logging
+from datetime import datetime
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, FSInputFile
@@ -57,14 +58,14 @@ async def handle_ff_house_logic(message: Message, state: FSMContext, user_tg_id,
         target_houses = []
 
         if is_super_admin:
-            res = await session.execute(select(House))
+            res = await session.execute(select(House).where(House.is_active == True, House.subscription_date >= datetime.now()))
             target_houses = res.scalars().all()
         else:
             res = await session.execute(
                 select(User).options(selectinload(User.houses)).where(User.telegram_id == user_tg_id)
             )
             user = res.scalar_one_or_none()
-            if user: target_houses = user.houses
+            if user: target_houses = [h for h in user.houses if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()]
 
         if not target_houses:
             msg_text = "❌ বর্তমানে সিস্টেমে কোনো হাউজ তৈরি করা নেই অথবা আপনার প্রোফাইলে কোনো হাউজ যুক্ত নেই।"

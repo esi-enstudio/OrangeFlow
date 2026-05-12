@@ -11,6 +11,7 @@ import app.Models.bts
 import app.Models.ga_filter
 import app.Models.mela
 import app.Models.activation
+import app.Models.subscription
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = async_sessionmaker(engine, expire_on_commit=False)

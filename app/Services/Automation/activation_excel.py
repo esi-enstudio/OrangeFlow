@@ -22,8 +22,19 @@ async def process_activation_excel(file_path, house_id, progress_callback):
         if total_rows == 0: return 0, "ফাইলটি খালি।"
 
         def clean(val):
-            v = str(val).strip().replace("'", "")
-            return None if v == "" or v.lower() in ["nan", "none", "null"] else v
+            v = str(val).strip()
+            # Excel এ leading single quote থাকলে তা সরানো
+            if v.startswith("'"):
+                v = v[1:]
+            v = v.replace("'", "")
+            if v == "" or v.lower() in ["nan", "none", "null"]:
+                return None
+
+            # তারিখ থেকে সময় বাদ দেওয়া
+            if ' ' in v and '-' in v:
+                v = v.split(' ')[0]  # "2026-04-21 00:00:00" -> "2026-04-21"
+
+            return v if v else None
 
         async with async_session() as session:
             # ২. পারফরম্যান্স বুস্ট: সব রিটেইলারকে মেমরিতে নিয়ে আসা ✅

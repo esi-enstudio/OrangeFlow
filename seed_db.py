@@ -5,6 +5,7 @@ from app.Services.db_service import async_session
 from app.Models.house import House
 from app.Models.user import User
 from app.Models.role import Role, Permission
+from app.Models.subscription import SubscriptionPackage, SubscriptionTier
 
 async def seed_data():
     async with async_session() as session:
@@ -75,14 +76,56 @@ async def seed_data():
             role = role_res.scalar_one_or_none()
             if not role:
                 role = Role(name=r_name)
-                # ম্যানেজারের সব পারমিশন থাকবে
+                # ম্যানেজারের সব পারমিশন থাকবে (renew_subscription বাদে - শুধু সুপার এডমিনের জন্য)
                 if r_name == "Manager":
-                    role.permissions = list(db_perms.values())
+                    role.permissions = [p for p in db_perms.values() if p.name != "renew_subscription"]
                 session.add(role)
             db_roles[r_name] = role
         
         await session.flush()
         print("[OK] Role seeding completed.")
+
+        # --- ২.৫ সাবস্ক্রিপশন প্যাকেজ সিডিং ---
+        packages_data = [
+            {
+                "name": "বেসিক",
+                "tier": SubscriptionTier.BASIC,
+                "duration_days": 30,
+                "price": 5000.00,
+                "description": "ছোট দলের জন্য মৌলিক সুবিধা",
+                "features": "হাউজ ম্যানেজমেন্ট, রিটেইলার ম্যানেজমেন্ট, বেসিক রিপোর্ট"
+            },
+            {
+                "name": "স্ট্যান্ডার্ড",
+                "tier": SubscriptionTier.STANDARD,
+                "duration_days": 30,
+                "price": 10000.00,
+                "description": "মাঝারি দলের জন্য উন্নত সুবিধা",
+                "features": "বেসিক সব + ফিল্ড ফোর্স ম্যানেজমেন্ট, এক্সেল ইমপোর্ট, এসএমএস সিঙ্ক"
+            },
+            {
+                "name": "প্রিমিয়াম",
+                "tier": SubscriptionTier.PREMIUM,
+                "duration_days": 30,
+                "price": 20000.00,
+                "description": "বড় দলের জন্য পূর্ণ সুবিধা",
+                "features": "স্ট্যান্ডার্ড সব + ডিএমএস ইন্টিগ্রেশন, অটোমেশন, প্রিমিয়াম সাপোর্ট"
+            },
+        ]
+
+        db_packages = {}
+        for pkg_data in packages_data:
+            pkg_res = await session.execute(
+                select(SubscriptionPackage).where(SubscriptionPackage.tier == pkg_data["tier"])
+            )
+            pkg = pkg_res.scalar_one_or_none()
+            if not pkg:
+                pkg = SubscriptionPackage(**pkg_data)
+                session.add(pkg)
+            db_packages[pkg_data["tier"].value] = pkg
+
+        await session.flush()
+        print("[OK] Subscription packages seeding completed.")
 
         # --- ৩. হাউজ সিডিং ---
         houses_to_create = [

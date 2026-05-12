@@ -68,9 +68,9 @@ class ACLMiddleware(BaseMiddleware):
                     return await handler(event, data)
                 return await event.answer("🚫 আপনি নিবন্ধিত ইউজার নন। এডমিনের সাথে যোগাযোগ করুন।")
             
-            # খ. একাউন্ট স্ট্যাটাস চেক
-            if hasattr(user, 'status') and user.status != "Active":
-                return await event.answer("🚫 আপনার অ্যাকাউন্টটি বর্তমানে স্থগিত (Inactive) আছে।")
+            # খ. একাউন্ট স্ট্যাটাস চেক (case-insensitive)
+            if hasattr(user, 'status') and user.status and user.status.lower() != "active":
+                return await event.answer("🚫 আপনার অ্যাকাউন্টটি বর্তমানে স্থগিত (Inactive) আছে। অ্যাডমিনের সাথে যোগাযোগ করুন।")
 
             # গ. রিকোয়ার্ড পারমিশন চেক (Flags)
             if required_permission:
@@ -79,8 +79,8 @@ class ACLMiddleware(BaseMiddleware):
 
                 # ঘ. সাবস্ক্রিপশন এবং হাউজ স্ট্যাটাস চেক
                 active_valid_houses = [
-                    h for h in user.houses 
-                    if h.is_active and h.subscription_date and h.subscription_date.date() >= today
+                    h for h in user.houses
+                    if h.is_active and h.subscription_date and h.subscription_date >= datetime.now()
                 ]
                 
                 if not active_valid_houses:

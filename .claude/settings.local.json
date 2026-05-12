@@ -12,7 +12,11 @@
       "PowerShell($env:PGPASSWORD='NeelimA54@#'; & \"C:\\\\Program Files\\PostgreSQL\\\\18\\\\bin\\\\psql.exe\" -U postgres -h localhost -d patwary_telecom_db -c \"DROP INDEX IF EXISTS ix_field_forces_itop_number;\")",
       "PowerShell($env:PGPASSWORD='NeelimA54@#'; & \"C:\\\\Program Files\\PostgreSQL\\\\18\\\\bin\\\\psql.exe\" -U postgres -h localhost -d patwary_telecom_db -c \"SELECT indexname FROM pg_indexes WHERE tablename = 'field_forces' AND indexname LIKE '%personal%';\")",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"from app.Controllers.ga_live_controller import router; print\\('OK - ga_live_controller loaded'\\)\")",
+      "Bash(python -c \"from app.Controllers.ga_live_controller import router; print\\('OK'\\)\")",
+      "Bash(python -m py_compile \"f:\\\\Telegram_Project\\\\OrangeFlow_Dev\\\\app\\\\Controllers\\\\ga_live_controller.py\")"
     ]
   }
 }
