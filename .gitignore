@@ -27,6 +27,7 @@ ENV/
 .idea/
 *.sublime-project
 *.sublime-workspace
+.claude/
 
 # ================================
 # OS Files

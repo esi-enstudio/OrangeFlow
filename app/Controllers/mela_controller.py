@@ -218,6 +218,7 @@ async def render_single_mela_view(message: Message, m_id: int, permissions: list
         builder = InlineKeyboardBuilder()
         if "edit_mela" in permissions: builder.button(text="✏️ এডিট", callback_data=f"melaedit:{m.id}")
         if "delete_mela" in permissions: builder.button(text="🗑 ডিলিট", callback_data=f"mdel_conf_{m.id}")
+        builder.button(text="📋 বিস্তারিত", callback_data=f"mela_details_menu_{m.id}")
         builder.button(text="📋 মেলার তালিকা", callback_data=f"mela_list_{m.house_id}_0")
         builder.adjust(2)
         
@@ -1171,7 +1172,334 @@ async def final_mela_del(callback: CallbackQuery, permissions: list):
     m_id = int(callback.data.split("_")[2])
     async with async_session() as session:
         m = await session.get(Mela, m_id)
-        if m: 
+        if m:
             h_id = m.house_id
             await session.delete(m); await session.commit()
             await callback.answer("🗑 ডিলিট সম্পন্ন"); await render_mela_dashboard(callback.message, h_id, permissions, edit_mode=True)
+
+
+# ==========================================
+# ৭. মেলা বিস্তারিত (GA লাইভের মতো)
+# ==========================================
+
+@router.callback_query(F.data.startswith("mela_details_menu_"))
+async def mela_details_menu(callback: CallbackQuery):
+    """মেলার বিস্তারিত মেনু - RSO/BP/রিটেইলার সিলেক্ট"""
+    m_id = int(callback.data.split("_")[3])
+
+    async with async_session() as session:
+        m = await session.get(Mela, m_id, options=[selectinload(Mela.assignments)])
+        if not m:
+            await callback.answer("মেলা পাওয়া যায়নি", show_alert=True)
+            return
+
+        # assignments থেকে কোড সংগ্রহ
+        rso_codes = [a.retailer_code for a in m.assignments if a.role_type == 'RSO']
+        bp_codes = [a.retailer_code for a in m.assignments if a.role_type == 'BP']
+        ret_codes = [a.retailer_code for a in m.assignments if a.role_type == 'SSO']
+
+        # কাউন্ট করুন (অ্যাক্টিভেশন সহ)
+        mela_date = m.activity_date
+        all_codes = rso_codes + bp_codes + ret_codes
+        activation_map = {}
+
+        if mela_date and all_codes:
+            lower_codes = [c.lower() for c in all_codes if c]
+            act_res = await session.execute(
+                select(Activation.retailer_code, func.count(Activation.id))
+                .where(
+                    Activation.house_id == m.house_id,
+                    Activation.activation_date == mela_date,
+                    func.lower(Activation.retailer_code).in_(lower_codes)
+                )
+                .group_by(Activation.retailer_code)
+            )
+            for code, count in act_res.all():
+                activation_map[code.upper() if code else ""] = count
+
+        # RSO/BP/রিটেইলার কাউন্ট
+        rso_count = len(rso_codes)
+        bp_count = len(bp_codes)
+        ret_count = len(ret_codes)
+
+        builder = InlineKeyboardBuilder()
+
+        if rso_count > 0:
+            rso_with_act = sum(1 for c in rso_codes if activation_map.get(c.upper() if c else "", 0) > 0)
+            builder.button(text=f"👨‍💼 আরএসও ({bn_num(rso_with_act)}/{bn_num(rso_count)} জন)", callback_data=f"mela_det_type_{m_id}_RSO_1")
+
+        if bp_count > 0:
+            bp_with_act = sum(1 for c in bp_codes if activation_map.get(c.upper() if c else "", 0) > 0)
+            builder.button(text=f"👷‍♂️ বিপি ({bn_num(bp_with_act)}/{bn_num(bp_count)} জন)", callback_data=f"mela_det_type_{m_id}_BP_1")
+
+        if ret_count > 0:
+            ret_with_act = sum(1 for c in ret_codes if activation_map.get(c.upper() if c else "", 0) > 0)
+            builder.button(text=f"🏪 রিটেইলার ({bn_num(ret_with_act)}/{bn_num(ret_count)} জন)", callback_data=f"mela_det_type_{m_id}_RETAILER_1")
+
+        builder.button(text="🔙 ফিরে যান", callback_data=f"mview_{m_id}")
+        builder.adjust(1)
+
+        text = f"🎪 <b>মেলা বিস্তারিত</b>\n"
+        text += f"📅 তারিখ: <b>{m.activity_date.strftime('%d-%m-%Y') if m.activity_date else 'N/A'}</b>\n"
+        text += f"🏘 থানা: <b>{m.thana or 'N/A'}</b>\n"
+        text += "─────────────────────\n"
+        text += "কারো অ্যাক্টিভেশন ডিটেইলস দেখতে টাইপ সিলেক্ট করুন:"
+
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("mela_det_type_"))
+async def mela_details_type_list(callback: CallbackQuery):
+    """নির্দিষ্ট টাইপের লিস্ট দেখা যাবে"""
+    parts = callback.data.split("_")
+    m_id = int(parts[3])
+    ff_type = parts[4]  # RSO, BP, RETAILER
+    page = int(parts[5])
+
+    limit = 5
+
+    async with async_session() as session:
+        m = await session.get(Mela, m_id, options=[selectinload(Mela.assignments)])
+        if not m:
+            await callback.answer("মেলা পাওয়া যায়নি", show_alert=True)
+            return
+
+        # কোড সংগ্রহ
+        if ff_type == 'RSO':
+            target_codes = [a.retailer_code for a in m.assignments if a.role_type == 'RSO' and a.retailer_code]
+        elif ff_type == 'BP':
+            target_codes = [a.retailer_code for a in m.assignments if a.role_type == 'BP' and a.retailer_code]
+        else:  # RETAILER
+            target_codes = [a.retailer_code for a in m.assignments if a.role_type == 'SSO' and a.retailer_code]
+
+        if not target_codes:
+            await callback.message.edit_text(
+                f"❌ কোনো {ff_type} পাওয়া যায়নি।",
+                reply_markup=InlineKeyboardBuilder().button(
+                    text="🔙 ফিরে যান",
+                    callback_data=f"mela_details_menu_{m_id}"
+                ).as_markup()
+            )
+            await callback.answer()
+            return
+
+        # পেজিনেশন
+        total = len(target_codes)
+        total_pages = max(1, (total + limit - 1) // limit)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        page_codes = target_codes[start_idx:end_idx]
+
+        builder = InlineKeyboardBuilder()
+
+        # মেলার তারিখ
+        mela_date = m.activity_date
+
+        for code in page_codes:
+            code_upper = code.upper()
+
+            # অ্যাক্টিভেশন কাউন্ট নিন
+            act_count = 0
+            if mela_date:
+                act_res = await session.execute(
+                    select(func.count(Activation.id)).where(
+                        Activation.house_id == m.house_id,
+                        Activation.activation_date == mela_date,
+                        func.lower(Activation.retailer_code) == code.lower()
+                    )
+                )
+                act_count = act_res.scalar() or 0
+
+            if ff_type == 'RETAILER':
+                # রিটেইলার নাম খুঁজুন
+                ret_res = await session.execute(
+                    select(Retailer).where(func.lower(Retailer.retailer_code) == code.lower())
+                )
+                retailer = ret_res.scalar_one_or_none()
+                name = retailer.name if retailer else code
+                display_text = f"🏪 {name} ({bn_num(act_count)}টি)"
+            else:
+                # RSO/BP - নাম খুঁজুন
+                ff_res = await session.execute(
+                    select(FieldForce).where(func.lower(FieldForce.assisted_retailer_code) == code.lower())
+                )
+                ff = ff_res.scalar_one_or_none()
+                name = ff.name if ff else code
+                number = str(ff.itop_number)[-3:] if ff and ff.itop_number else (str(ff.pool_number)[-3:] if ff and ff.pool_number else "")
+                display_text = f"👤 {name} ({number}) - {bn_num(act_count)}টি" if number else f"👤 {name} - {bn_num(act_count)}টি"
+
+            builder.button(text=display_text, callback_data=f"mela_det_item_{m_id}_{ff_type}_{code}")
+
+        # পেজিনেশন
+        if total_pages > 1:
+            nav_buttons = []
+            if page > 1:
+                nav_buttons.append(("◀️ পূর্ববর্তী", f"mela_det_type_{m_id}_{ff_type}_{page-1}"))
+            if page < total_pages:
+                nav_buttons.append(("পরবর্তী ▶️", f"mela_det_type_{m_id}_{ff_type}_{page+1}"))
+            for btn_text, btn_data in nav_buttons:
+                builder.button(text=btn_text, callback_data=btn_data)
+
+        builder.button(text="🔙 ফিরে যান", callback_data=f"mela_details_menu_{m_id}")
+
+        if total_pages > 1:
+            builder.adjust(*([1] * len(page_codes) + [2, 1]))
+        else:
+            builder.adjust(*([1] * len(page_codes) + [1]))
+
+        type_label = {"RSO": "আরএসও", "BP": "বিপি", "RETAILER": "রিটেইলার"}.get(ff_type, ff_type)
+        text = f"📋 <b>{type_label} লিস্ট</b> (পেজ {bn_num(page)}/{bn_num(total_pages)})\n"
+        text += f"📅 মেলার তারিখ: <b>{m.activity_date.strftime('%d-%m-%Y') if m.activity_date else 'N/A'}</b>\n"
+        text += f"─────────────────────\n"
+        text += f"মোট: {bn_num(total)} জন"
+
+        await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("mela_det_item_"))
+async def mela_details_item_view(callback: CallbackQuery):
+    """নির্দিষ্ট আইটেমের অ্যাক্টিভেশন ডিটেইলস"""
+    parts = callback.data.split("_")
+    m_id = int(parts[3])
+    ff_type = parts[4]  # RSO, BP, RETAILER
+    # বাকি অংশ হলো কোড (underscore থাকতে পারে)
+    code = "_".join(parts[5:])
+
+    async with async_session() as session:
+        m = await session.get(Mela, m_id)
+        if not m:
+            await callback.answer("মেলা পাওয়া যায়নি", show_alert=True)
+            return
+
+        mela_date = m.activity_date
+        if not mela_date:
+            await callback.message.edit_text(
+                "❌ মেলার তারিখ পাওয়া যায়নি।",
+                reply_markup=InlineKeyboardBuilder().button(
+                    text="🔙 ফিরে যান",
+                    callback_data=f"mela_details_menu_{m_id}"
+                ).as_markup()
+            )
+            await callback.answer()
+            return
+
+        # অ্যাক্টিভেশন লোড
+        activations = []
+        if ff_type == 'RETAILER':
+            # রিটেইলারের নিজের অ্যাক্টিভেশন
+            activations = (await session.execute(
+                select(Activation).where(
+                    Activation.house_id == m.house_id,
+                    Activation.activation_date == mela_date,
+                    func.lower(Activation.retailer_code) == code.lower()
+                )
+            )).scalars().all()
+        else:
+            # RSO/BP - নিজের কোড এবং অধীন রিটেইলারদের অ্যাক্টিভেশন
+            target_codes = [code]
+
+            if ff_type == 'RSO':
+                # RSO এর অধীন রিটেইলার কোড খুঁজুন
+                rso_res = await session.execute(
+                    select(FieldForce).options(selectinload(FieldForce.retailers))
+                    .where(func.lower(FieldForce.assisted_retailer_code) == code.lower())
+                )
+                rso = rso_res.scalar_one_or_none()
+                if rso and rso.retailers:
+                    for r in rso.retailers:
+                        if r.retailer_code:
+                            target_codes.append(r.retailer_code)
+
+            lower_codes = [c.lower() for c in target_codes]
+            activations = (await session.execute(
+                select(Activation).where(
+                    Activation.house_id == m.house_id,
+                    Activation.activation_date == mela_date,
+                    func.lower(Activation.retailer_code).in_(lower_codes)
+                )
+            )).scalars().all()
+
+        if not activations:
+            await callback.message.edit_text(
+                f"❌ এই {ff_type} এর জন্য কোনো অ্যাক্টিভেশন পাওয়া যায়নি।",
+                reply_markup=InlineKeyboardBuilder().button(
+                    text="🔙 ফিরে যান",
+                    callback_data=f"mela_det_type_{m_id}_{ff_type}_1"
+                ).as_markup()
+            )
+            await callback.answer()
+            return
+
+        # নাম এবং নাম্বার
+        name = code
+        number = ""
+        if ff_type == 'RETAILER':
+            ret_res = await session.execute(
+                select(Retailer).where(func.lower(Retailer.retailer_code) == code.lower())
+            )
+            retailer = ret_res.scalar_one_or_none()
+            if retailer:
+                name = retailer.name
+                number = str(retailer.itop_number) if retailer.itop_number else ""
+        else:
+            ff_res = await session.execute(
+                select(FieldForce).where(func.lower(FieldForce.assisted_retailer_code) == code.lower())
+            )
+            ff = ff_res.scalar_one_or_none()
+            if ff:
+                name = ff.name
+                if ff_type == 'RSO' and ff.itop_number:
+                    number = str(ff.itop_number)
+                elif ff.pool_number:
+                    number = str(ff.pool_number)
+
+        # টেক্সট তৈরি
+        text = f"<b>{name}</b>\n"
+        text += f"{number}\n" if number else ""
+        text += f"{code} • {len(activations)}\n"
+        text += "─────────────────────\n"
+
+        # প্রোডাক্ট কোড অনুযায়ী গ্রুপ
+        product_groups = {}
+        for act in activations:
+            prod_code = str(act.product_code).strip() if act.product_code else "UNKNOWN"
+            if prod_code not in product_groups:
+                product_groups[prod_code] = []
+            product_groups[prod_code].append(act)
+
+        first_group = True
+        for prod_code, acts in sorted(product_groups.items()):
+            if not first_group:
+                text += "\n━━━━━━━━━━━━━━\n"
+            first_group = False
+
+            text += f"<b>{prod_code}</b> • {len(acts)}\n"
+
+            for i, act in enumerate(acts):
+                text += f"{act.sim_no or 'N/A'}\n"
+                text += f"{act.msisdn or 'N/A'}"
+
+                if act.activation_time:
+                    text += f" • {act.activation_time}"
+                text += "\n"
+
+                if act.dh_lifting_date:
+                    text += f"Lifting Date: {str(act.dh_lifting_date)[:10]}\n"
+                if act.issue_date:
+                    text += f"Issue Date: {str(act.issue_date)[:10]}"
+
+                if i < len(acts) - 1:
+                    text += "\n\n"
+
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔄 রিফ্রেশ", callback_data=f"mela_det_item_{m_id}_{ff_type}_{code}")
+        builder.button(text="🔙 ফিরে যান", callback_data=f"mela_det_type_{m_id}_{ff_type}_1")
+        builder.adjust(2)
+
+        try:
+            await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        except Exception:
+            pass
+    await callback.answer()
