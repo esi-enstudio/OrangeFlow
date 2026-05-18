@@ -4,3 +4,11 @@ asyncpg
 python-dotenv~=1.0.1
 psycopg2-binary
 playwright
+pyngrok
+pandas
+aiohttp
+openpyxl
+beautifulsoup4
+lxml
+requests
+httpx
