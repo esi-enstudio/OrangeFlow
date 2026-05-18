@@ -4,6 +4,41 @@
 কিবোর্ড ডাকার সময় (permissions) পাস করা হয়েছে।
 
 
+✦ Ekhon theke project run korar jonno apnake bar bar build korte hobe na. Niche deya command gulo mone rakhlei hobe:
+
+  ১. সাধারণ ভাবে স্টার্ট করার জন্য:
+  Jodi apni bot-ti chalu korte chan (background-e cholbe):
+   1 docker-compose up -d
+
+  ২. বট বন্ধ করার জন্য:
+  Jodi bot bondho korte chan:
+   1 docker-compose stop
+
+  ৩. পুনরায় চালু (Restart) করার জন্য:
+  Jodi .env file-e kono change koren ba bot-ti restart korte hoy:
+   1 docker-compose restart bot
+
+  ৪. লগ দেখার জন্য (সবচেয়ে বেশি কাজে লাগবে):
+  Bot thikmoto kaj korche kina ba kono error dicche kina ta dekhar jonno:
+   1 docker logs -f orange_flow_bot
+
+  ৫. সব কিছু বন্ধ করে ডিলিট করার জন্য:
+  Jodi apni sob container bondho kore dore felte chan:
+   1 docker-compose down
+
+  টিপস:
+   * Jodi apni project-er code-e kono boro change koren ba requirements.txt-e notun library add koren, tobei kebol --build flag-ti use korben:
+     docker-compose up -d --build.
+     
+   * Docker use korar subidha holo, apnar computer restart holeo (jodi Docker auto-start thake) bot-ti nijei abar chalu hoye jabe (restart:
+     always deya ache tai).
+
+
+1. Database Seeding: Apnar project-e seed_db.py namer ekta file ache. Jodi bot-e kono data na thake ba kono user authorized na thake, tobe
+      apni database-ti seed korte paren. Docker-er vitor theke eta korar command:
+
+   1    docker exec -it orange_flow_bot python seed_db.py
+
 
 Toriqul Islam
 8217920077
